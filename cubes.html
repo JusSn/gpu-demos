@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=1000">
+<title>Web GPU Cubes demo</title>
+<script src="gl-matrix-min.js"></script>
+</head>
+<body>
+<canvas height=1000 width=1000></canvas>
+<script>
+const mvpBindingNum             = 0;
+const normalBindingNum          = 1;
+const ambientColorBindingNum    = 2;
+const multiplierBindingNum      = 3;
+
+const positionAttributeNum  = 0;
+const normalAttributeNum    = 1;
+
+const vertexBufferIndex = 0;
+const bindGroupIndex = 0;
+
+const shader = `
+#include <metal_stdlib>
+
+using namespace metal;
+
+struct UniformArgs
+{
+    constant float4x4* mvpMatrix     [[id(${mvpBindingNum})]];
+    constant float4x4* normalMatrix  [[id(${normalBindingNum})]];
+    constant float4* ambientColor    [[id(${ambientColorBindingNum})]];
+    constant float* multiplier       [[id(${multiplierBindingNum})]];
+};
+
+constant float3 lightPosition = float3(0, -1, 1);
+constant float4 lightColor = float4(1, 1, 1, 1);
+
+struct VertexIn {
+    float3 position [[attribute(${positionAttributeNum})]];
+    float3 normal   [[attribute(${normalAttributeNum})]];
+};
+
+struct VertexOut {
+    float4 position [[position]];
+    half4 color;
+};
+
+vertex VertexOut vertexFunction(VertexIn vertexArgs                 [[stage_in]], 
+                                constant UniformArgs& uniformArgs   [[buffer(${bindGroupIndex})]])
+{
+    VertexOut out;
+
+    float4 position = float4(vertexArgs.position, 1);
+    out.position = uniformArgs.mvpMatrix[0] * position;
+
+    float3 normal = vertexArgs.normal;
+    float4 eyeNormal = normalize(uniformArgs.normalMatrix[0] * float4(normal, 0));
+
+    float nDotl = dot(eyeNormal.rgb, normalize(lightPosition));
+    nDotl = fmax(0, nDotl);
+
+    out.color = half4(uniformArgs.ambientColor[0] + lightColor * nDotl);
+
+    return out;
+}
+
+fragment half4 fragmentFunction(VertexOut v [[stage_in]])
+{
+    return v.color;
+}
+`;
+
+const UniformSize = 37;
+class MappedUniform {
+    constructor(gpuBuffer, arrayBuffer, bindGroup) {
+        const float32Array = new Float32Array(arrayBuffer);
+
+        if (!arrayBuffer || float32Array.length != UniformSize) {
+            console.log("Incorrect backing store for MappedUniform");
+            return;
+        }
+
+        this.buffer = gpuBuffer;
+        this.array = float32Array;
+        this.bindGroup = bindGroup;
+    }
+    get buffer() {
+        return this.buffer;
+    }
+    get bindGroup() {
+        return this.bindGroup;
+    }
+    // Layout is
+    // 0-15 = model_view_projection_matrix (float4x4)
+    // 16-31 = normal matrix (float4x4)
+    // 32-35 = ambient color (float4)
+    // 36 = multiplier (int)
+    get array() {
+        return this.array;
+    }
+    get mvp() {
+        return this.array.subarray(0, 16);
+    }
+    get normal() {
+        return this.array.subarray(16, 32);
+    }
+    get ambientColor() {
+        return this.array.subarray(32, 36);
+    }
+    get multiplier() {
+        return this.array[40];
+    }
+    set mvp(value) {
+        this._copyMatrix(value, 0);
+    }
+    set normal(value) {
+        this._copyMatrix(value, 16);
+    }
+    set ambientColor(value) {
+        this.array[32] = value[0];
+        this.array[33] = value[1];
+        this.array[34] = value[2];
+        this.array[35] = value[3];
+    }
+    set multiplier(value) {
+        this.array[36] = value;
+    }
+    _copyMatrix(matrix, offset) {
+        for (var i = 0; i < 16; i++) {
+            this.array[offset + i] = matrix[i];
+        }
+    }
+}
+
+MappedUniform.MvpBufferSize = 4 * 16;
+MappedUniform.NormalBufferOffset = MappedUniform.MvpBufferSize;
+MappedUniform.NormalBufferSize = 4 * 16;
+MappedUniform.AmbientColorBufferOffset = MappedUniform.NormalBufferOffset + MappedUniform.NormalBufferSize;
+MappedUniform.AmbientColorBufferSize = 4 * 4;
+MappedUniform.MultiplierBufferOffset = MappedUniform.AmbientColorBufferOffset + MappedUniform.AmbientColorBufferSize;
+MappedUniform.MultiplierBufferSize = 4;
+
+const smoothstep = (min, max, value) => {
+    let x = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    return x * x * (3 - 2 * x);
+};
+
+const inTimeRange = (now, start, end, period) => {
+    let offset = now % period;
+    return offset >= start && offset <= end;
+};
+
+const timeRangeOffset = (now, start, end, period) => {
+    if (!inTimeRange(now, start, end, period)) {
+        return 0;
+    }
+    let offset = now % period;
+    return Math.min(1, Math.max(0, (offset - start) / (end - start)));
+};
+
+const middlePeakTimeRangeOffset = (now, start, end, period) => {
+    let offset = timeRangeOffset(now, start, end, period);
+    return 1 - Math.abs(0.5 - offset) * 2;
+};
+
+const kNumberOfBoxesPerAxis = 6;
+const kNumberOfBoxes = kNumberOfBoxesPerAxis * kNumberOfBoxesPerAxis;
+const kBoxBaseAmbientColor = [0.2, 0.2, 0.2, 1.0];
+const kFOVY = 45.0 / 180 * Math.PI;
+const kEye = vec3.fromValues(0.0, 2.75, -2);
+const kCenter = vec3.fromValues(0.0, 1.5, 1.0);
+const kUp = vec3.fromValues(0.0, 1.0, 0.0);
+const kEdge = 1.5 / kNumberOfBoxesPerAxis ;
+
+const vertexSize = 4 * 6;
+const normalsOffset = 4 * 3;
+const kCubeVertexData = new Float32Array(
+[
+    kEdge, -kEdge, kEdge, 0.0, -1.0, 0.0,
+    -kEdge, -kEdge, kEdge, 0.0, -1.0, 0.0,
+    -kEdge, -kEdge, -kEdge, 0.0, -1.0, 0.0,
+    kEdge, -kEdge, -kEdge, 0.0, -1.0, 0.0,
+    kEdge, -kEdge, kEdge, 0.0, -1.0, 0.0,
+    -kEdge, -kEdge, -kEdge, 0.0, -1.0, 0.0,
+
+    kEdge, kEdge, kEdge, 1.0, 0.0, 0.0,
+    kEdge, -kEdge, kEdge, 1.0, 0.0, 0.0,
+    kEdge, -kEdge, -kEdge, 1.0, 0.0, 0.0,
+    kEdge, kEdge, -kEdge, 1.0, 0.0, 0.0,
+    kEdge, kEdge, kEdge, 1.0, 0.0, 0.0,
+    kEdge, -kEdge, -kEdge, 1.0, 0.0, 0.0,
+
+    -kEdge, kEdge, kEdge, 0.0, 1.0, 0.0,
+    kEdge, kEdge, kEdge, 0.0, 1.0, 0.0,
+    kEdge, kEdge, -kEdge, 0.0, 1.0, 0.0,
+    -kEdge, kEdge, -kEdge, 0.0, 1.0, 0.0,
+    -kEdge, kEdge, kEdge, 0.0, 1.0, 0.0,
+    kEdge, kEdge, -kEdge, 0.0, 1.0, 0.0,
+
+    -kEdge, -kEdge, kEdge, -1.0, 0.0, 0.0,
+    -kEdge, kEdge, kEdge, -1.0, 0.0, 0.0,
+    -kEdge, kEdge, -kEdge, -1.0, 0.0, 0.0,
+    -kEdge, -kEdge, -kEdge, -1.0, 0.0, 0.0,
+    -kEdge, -kEdge, kEdge, -1.0, 0.0, 0.0,
+    -kEdge, kEdge, -kEdge, -1.0, 0.0, 0.0,
+
+    kEdge, kEdge, kEdge, 0.0, 0.0, 1.0,
+    -kEdge, kEdge, kEdge, 0.0, 0.0, 1.0,
+    -kEdge, -kEdge, kEdge, 0.0, 0.0, 1.0,
+    -kEdge, -kEdge, kEdge, 0.0, 0.0, 1.0,
+    kEdge, -kEdge, kEdge, 0.0, 0.0, 1.0,
+    kEdge, kEdge, kEdge, 0.0, 0.0, 1.0,
+
+    kEdge, -kEdge, -kEdge, 0.0, 0.0, -1.0,
+    -kEdge, -kEdge, -kEdge, 0.0, 0.0, -1.0,
+    -kEdge, kEdge, -kEdge, 0.0, 0.0, -1.0,
+    kEdge, kEdge, -kEdge, 0.0, 0.0, -1.0,
+    kEdge, -kEdge, -kEdge, 0.0, 0.0, -1.0,
+    -kEdge, kEdge, -kEdge, 0.0, 0.0, -1.0
+]);
+
+let projectionMatrix = mat4.create();
+let viewMatrix = mat4.create();
+
+var startTime;
+var elapsedTime;
+let cameraRotation = 0;
+let cameraAltitude = 0;
+
+let device;
+let vertexBuffer;
+let bindGroupLayout;
+
+window.addEventListener("load", init, false);
+
+async function init() {
+    const canvas = document.querySelector('canvas');
+
+    const aspect = Math.abs(canvas.width / canvas.height);
+    mat4.perspective(projectionMatrix, kFOVY, aspect, 0.1, 100.0);
+    mat4.lookAt(viewMatrix, kEye, kCenter, kUp);
+
+    const context = canvas.getContext('gpu');
+
+    const adapter = await gpu.requestAdapter();
+    device = await adapter.requestDevice();
+
+    const swapChainDescriptor = {
+        context: context,
+        format: "bgra8unorm"
+    };
+    const swapchain = device.createSwapChain(swapChainDescriptor);
+
+    const mvpMatrixBGLBinding = {
+        binding: mvpBindingNum,
+        visibility: GPUShaderStageBit.VERTEX,
+        type: "uniform-buffer"
+    };
+    const normalMatrixBGLBinding = {
+        binding: normalBindingNum,
+        visibility: GPUShaderStageBit.VERTEX,
+        type: "uniform-buffer"
+    };
+    const ambientColorBGLBinding = {
+        binding: ambientColorBindingNum,
+        visibility: GPUShaderStageBit.VERTEX,
+        type: "uniform-buffer"
+    };
+    const multiplierBGLBinding = {
+        binding: multiplierBindingNum,
+        visibility: GPUShaderStageBit.VERTEX,
+        type: "uniform-buffer"
+    };
+    const bindGroupLayoutDescriptor = {
+        bindings: [
+            mvpMatrixBGLBinding, normalMatrixBGLBinding, ambientColorBGLBinding, multiplierBGLBinding
+        ]
+    };
+    bindGroupLayout = device.createBindGroupLayout(bindGroupLayoutDescriptor);
+
+    const pipelineLayoutDescriptor = { bindGroupLayouts: [bindGroupLayout] };
+    const pipelineLayout = device.createPipelineLayout(pipelineLayoutDescriptor);
+
+    const shaderModule = device.createShaderModule({ code: shader });
+    const vertexStageDescriptor = {
+        module: shaderModule,
+        entryPoint: "vertexFunction"
+    };
+    const fragmentStageDescriptor = {
+        module: shaderModule,
+        entryPoint: "fragmentFunction"
+    };
+
+    const depthStateDescriptor = {
+        depthWriteEnabled: true,
+        depthCompare: "less"
+    };
+
+    const positionAttributeDescriptor = {
+        shaderLocation: positionAttributeNum,
+        inputSlot: vertexBufferIndex,
+        offset: 0,
+        format: "float3"
+    };
+    const normalAttributeDescriptor = {
+        shaderLocation: normalAttributeNum,
+        inputSlot: vertexBufferIndex,
+        offset: normalsOffset,
+        format: "float3"
+    };
+    const vertexInputDescriptor = {
+        inputSlot: vertexBufferIndex,
+        stride: vertexSize,
+        stepMode: "vertex"
+    };
+    const inputStateDescriptor = {
+        indexFormat: "uint32",
+        attributes: [positionAttributeDescriptor, normalAttributeDescriptor],
+        inputs: [vertexInputDescriptor]
+    };
+
+    const pipelineDescriptor = {
+        layout: pipelineLayout,
+
+        vertexStage: vertexStageDescriptor,
+        fragmentStage: fragmentStageDescriptor,
+
+        primitiveTopology: "triangle-list",
+        colorStates: [{ format: "bgra8unorm" }],
+        depthStencilState: depthStateDescriptor,
+        inputState: inputStateDescriptor
+    };
+    const pipeline = device.createRenderPipeline(pipelineDescriptor);
+
+    const vertexBufferDescriptor = {
+        size: kCubeVertexData.byteLength,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.TRANSFER_DST
+    };
+    vertexBuffer = device.createBuffer(vertexBufferDescriptor);
+    vertexBuffer.setSubData(0, kCubeVertexData.buffer);
+
+    const depthTextureDescriptor = {
+        size: { width: canvas.width, height: canvas.height, depth: 1 },
+        arrayLayerCount: 1,
+        mipLevelCount: 1,
+        sampleCount: 1,
+        dimension: "2d",
+        format: "depth32float-stencil8",
+        usage: GPUTextureUsage.OUTPUT_ATTACHMENT
+    };
+    const depthTexture = device.createTexture(depthTextureDescriptor);
+    
+    const colorAttachment = {
+        loadOp: "clear",
+        storeOp: "store",
+        clearColor: { r: 0.35, g: 0.65, b: 0.85, a: 1.0 }
+    };
+    const depthAttachment = {
+        attachment: depthTexture.createDefaultView(),
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+        clearDepth: 1.0
+    };
+    const renderPassDescriptor = {
+        colorAttachments: [colorAttachment],
+        depthStencilAttachment: depthAttachment
+    };
+
+    prepBindGroups();
+}
+
+const uniformBufferDescriptor = {
+    size: UniformSize,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.MAP_WRITE
+};
+
+function createBindGroupDescriptor(uniformBuffer) {
+    const mvpMatrixBufferBinding = {
+        buffer: uniformBuffer,
+        offset: 0,
+        size: MappedUniform.MvpBufferSize
+    };
+    const mvpMatrixBinding = { binding: mvpBindingNum, resource: mvpMatrixBufferBinding };
+    const normalMatrixBufferBinding = {
+        buffer: uniformBuffer,
+        offset: MappedUniform.NormalMatrixBufferOffset,
+        size: MappedUniform.NormalBufferSize
+    };
+    const normalMatrixBinding = { binding: normalBindingNum, resource: normalMatrixBufferBinding };
+    const ambientColorBufferBinding = {
+        buffer: uniformBuffer,
+        offset: MappedUniform.AmbientColorBufferOffset,
+        size: MappedUniform.AmbientColorBufferSize
+    };
+    const ambientColorBinding = { binding: ambientColorBindingNum, resource: ambientColorBufferBinding };
+    const multiplierBufferBinding = {
+        buffer: uniformBuffer,
+        offset: MappedUniform.MultiplierBufferOffset,
+        size: MappedUniform.MultiplierBufferSize
+    };
+    const multiplierBinding = { binding: multiplierBindingNum, resource: multiplierBufferBinding };
+
+    return {
+        layout: bindGroupLayout,
+        bindings: [mvpMatrixBinding, normalMatrixBinding, ambientColorBinding, multiplierBinding]
+    };
+}
+
+let mappedUniforms = [];
+
+async function prepBindGroups() {
+    if (mappedUniforms.length)
+        drawCubes(mappedUniforms.shift());
+    else {
+        // TODO: Every cube needs its own uniform buffer; the GPUBuffer is big enough to hold uniforms for all cubes for that frame.
+        const uniformBuffer = device.createBuffer(uniformBufferDescriptor);
+        uniformBuffer.mapWriteAsync().then(arrayBuffer => {
+            const bindGroup = device.createBindGroup(createBindGroupDescriptor(buffer));
+            const uniform = new MappedUniform(uniformBuffer, arrayBuffer, bindGroup);
+            drawCubes(uniform);
+        });
+    }
+}
+
+function drawCubes(mappedBindGroup) {}
+</script>
+</body>
