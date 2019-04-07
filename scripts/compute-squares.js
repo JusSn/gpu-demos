@@ -1,3 +1,5 @@
+// This demo is based on webgl-compute-bitonicSort, found at https://github.com/9ballsyndrome/WebGL_Compute_shader.
+
 const MAX_THREAD_NUM = 1024;
 const MAX_GROUP_NUM = 2048;
 const MAX_ORIGINAL_VALUE = 94906265; // Largest safe square root in JS.
