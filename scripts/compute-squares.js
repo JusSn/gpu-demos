@@ -6,9 +6,8 @@ let logElement;
 let selectBox;
 
 let device;
-let bitonicSortProgram1;
-let bitonicSortProgram2;
-let bitonicSortProgram2UniformLocation;
+const dataBinding = 0;
+const bindGroupIndex = 0;
 
 const main = async () => {
   // Selector setup
@@ -39,18 +38,13 @@ const main = async () => {
     return;
   }
 
-  // const initializeResult = initializeComputeProgram();
-  // if (!initializeResult) {
-  //   return;
-  // }
-
   compute();
 };
 
 const compute = async () => {
   const length = getLength(selectBox.selectedIndex);
   console.log(`square test: ${length}`);
-  const arr = new Float32Array(length);
+  const arr = new Uint32Array(length);
   resetData(arr);
 
   await computeCPU(arr.slice(0));
@@ -62,7 +56,7 @@ const compute = async () => {
 
 const computeCPU = async (arr) => {
   const now = performance.now();
-  arr.foreach((value, index) => {
+  arr.forEach((value, index) => {
     arr[index] = value * value;
   });
   log(`CPU square time: ${Math.round(performance.now() - now)} ms`)
@@ -72,142 +66,73 @@ const computeCPU = async (arr) => {
 const computeGPU = async (arr) => {
   const now = performance.now();
 
-  const length = arr.length;
+  // const threadgroupsPerGrid = Math.max(1, length / MAX_THREAD_NUM);
 
-  const threadgroupsPerGrid = Math.max(1, length / MAX_THREAD_NUM);
+  const shaderModule = createComputeShader(arr.length);
+  const pipeline = device.createComputePipeline({ 
+    computeStage: { module: shaderModule, entryPoint: "squares_main" } 
+  });
+  
+  const dataBuffer = device.createBuffer({ 
+    size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.TRANSFER_DST | GPUBufferUsage.MAP_READ
+  });
+  dataBuffer.setSubData(0, arr.buffer);
 
-  // create ShaderStorageBuffer
-  // const ssbo = context.createBuffer();
-  // context.bindBuffer(context.SHADER_STORAGE_BUFFER, ssbo);
-  // context.bufferData(context.SHADER_STORAGE_BUFFER, arr, context.STATIC_DRAW);
-  // context.bindBufferBase(context.SHADER_STORAGE_BUFFER, 0, ssbo);
+  const dataBindGroupLayout = device.createBindGroupLayout({ 
+    bindings: [{ binding: dataBinding, visibility: GPUShaderStageBit.COMPUTE, type: "storage-buffer" }]
+  });
 
-  // // execute ComputeShader
-  // context.useProgram(bitonicSortProgram1);
-  // context.dispatchCompute(threadgroupsPerGrid, 1, 1);
-  // context.memoryBarrier(context.SHADER_STORAGE_BARRIER_BIT);
+  const dataBindGroup = device.createBindGroup({
+    layout: dataBindGroupLayout,
+    bindings: [{
+      binding: dataBinding,
+      resource: { buffer: dataBuffer, offset: 0, size: arr.byteLength }
+    }]
+  });
 
-  // if (threadgroupsPerGrid > 1) {
-  //   for (let k = threadgroupsPerGrid; k <= length; k <<= 1) {
-  //     for (let j = k >> 1; j > 0; j >>= 1) {
-  //       // execute ComputeShader
-  //       context.useProgram(bitonicSortProgram2);
-  //       context.uniform4uiv(bitonicSortProgram2UniformLocation, new Uint32Array([k, j, 0, 0]));
-  //       context.dispatchCompute(threadgroupsPerGrid, 1, 1);
-  //       context.memoryBarrier(context.SHADER_STORAGE_BARRIER_BIT);
-  //     }
-  //   }
-  // }
+  const commandEncoder = device.createCommandEncoder();
+  const passEncoder = commandEncoder.beginComputePass();
+  passEncoder.setBindGroup(bindGroupIndex, dataBindGroup);
+  passEncoder.setPipeline(pipeline);
+  passEncoder.dispatch(arr.length, 1, 1);
+  passEncoder.endPass();
 
-  // // get result
-  // const result = new Float32Array(length);
-  // context.getBufferSubData(context.SHADER_STORAGE_BUFFER, 0, result);
-  log(`GPU sort time: ${Math.round(performance.now() - now)} ms`);
+  device.getQueue().submit([commandEncoder.finish()]);
+
+  // get result
+  const resultArrayBuffer = await dataBuffer.mapReadAsync();
+  log(`GPU square time: ${Math.round(performance.now() - now)} ms`);
+  const result = new Uint32Array(resultArrayBuffer);
+  console.log(result.length == arr.length);
   console.log(result);
 };
 
 const resetData = (arr) => {
-  arr.foreach((v, index) => {
+  arr.forEach((v, index) => {
     arr[index] = Math.floor(Math.random() * Math.floor(MAX_ORIGINAL_VALUE));
   });
 };
 
-// const initializeComputeProgram = () => {
-//   // ComputeShader source
-//   // language=GLSL
-//   const computeShaderSource1 = `#version 310 es
-//     layout (local_size_x = ${MAX_THREAD_NUM}, local_size_y = 1, local_size_z = 1) in;
-//     layout (std430, binding = 0) buffer SSBO {
-//       float data[];
-//     } ssbo;
-//     shared float sharedData[${MAX_THREAD_NUM}];
-    
-//     void main() {
-//       sharedData[gl_LocalInvocationID.x] = ssbo.data[gl_GlobalInvocationID.x];
-//       memoryBarrierShared();
-//       barrier();
-      
-//       uint offset = gl_WorkGroupID.x * gl_WorkGroupSize.x;
-      
-//       float tmp;
-//       for (uint k = 2u; k <= gl_WorkGroupSize.x; k <<= 1) {
-//         for (uint j = k >> 1; j > 0u; j >>= 1) {
-//           uint ixj = (gl_GlobalInvocationID.x ^ j) - offset;
-//           if (ixj > gl_LocalInvocationID.x) {
-//             if ((gl_GlobalInvocationID.x & k) == 0u) {
-//               if (sharedData[gl_LocalInvocationID.x] > sharedData[ixj]) {
-//                 tmp = sharedData[gl_LocalInvocationID.x];
-//                 sharedData[gl_LocalInvocationID.x] = sharedData[ixj];
-//                 sharedData[ixj] = tmp;
-//               }
-//             }
-//             else
-//             {
-//               if (sharedData[gl_LocalInvocationID.x] < sharedData[ixj]) {
-//                 tmp = sharedData[gl_LocalInvocationID.x];
-//                 sharedData[gl_LocalInvocationID.x] = sharedData[ixj];
-//                 sharedData[ixj] = tmp;
-//               }
-//             }
-//           }
-//           memoryBarrierShared();
-//           barrier();
-//         }
-//       }
-//       ssbo.data[gl_GlobalInvocationID.x] = sharedData[gl_LocalInvocationID.x];
-//     }
-//     `;
+const createComputeShader = (length) => {
+  // FIXME: Replace with non-MSL.
+  return device.createShaderModule({ code: `
+    #include <metal_stdlib>
 
-//   // create WebGLProgram for ComputeShader
-//   bitonicSortProgram1 = createComputeProgram(computeShaderSource1);
-//   if (!bitonicSortProgram1) {
-//     return false;
-//   }
+    struct Data {
+        device unsigned* numbers [[id(${dataBinding})]];
+    };
 
-//   // language=GLSL
-//   const computeShaderSource2 = `#version 310 es
-//     layout (local_size_x = ${MAX_THREAD_NUM}, local_size_y = 1, local_size_z = 1) in;
-//     layout (std430, binding = 0) buffer SSBO {
-//       float data[];
-//     } ssbo;
-//     uniform uvec4 numElements;
-    
-//     void main() {
-//        float tmp;
-//       uint ixj = gl_GlobalInvocationID.x ^ numElements.y;
-//       if (ixj > gl_GlobalInvocationID.x)
-//       {
-//         if ((gl_GlobalInvocationID.x & numElements.x) == 0u)
-//         {
-//           if (ssbo.data[gl_GlobalInvocationID.x] > ssbo.data[ixj])
-//           {
-//             tmp = ssbo.data[gl_GlobalInvocationID.x];
-//             ssbo.data[gl_GlobalInvocationID.x] = ssbo.data[ixj];
-//             ssbo.data[ixj] = tmp;
-//           }
-//         }
-//         else
-//         {
-//           if (ssbo.data[gl_GlobalInvocationID.x] < ssbo.data[ixj])
-//           {
-//             tmp = ssbo.data[gl_GlobalInvocationID.x];
-//             ssbo.data[gl_GlobalInvocationID.x] = ssbo.data[ixj];
-//             ssbo.data[ixj] = tmp;
-//           }
-//         }
-//       }
-//     }
-//     `;
+    kernel void squares_main(device Data& data [[buffer(${bindGroupIndex})]], unsigned gid [[thread_position_in_grid]])
+    {
+        if (gid >= ${length})
+            return;
 
-//   // create WebGLProgram for ComputeShader
-//   bitonicSortProgram2 = createComputeProgram(computeShaderSource2);
-//   if (!bitonicSortProgram2) {
-//     return false;
-//   }
-//   bitonicSortProgram2UniformLocation = context.getUniformLocation(bitonicSortProgram2, 'numElements');
-
-//   return true;
-// };
+        unsigned original = data.numbers[gid];
+        data.numbers[gid] = original * original;
+    }
+    ` 
+  });
+}
 
 const getLength = (index) => {
   return 1 << (index + 10);
@@ -216,6 +141,5 @@ const getLength = (index) => {
 const log = (str) => {
   logElement.innerText += str + '\n';
 };
-
 
 window.addEventListener('DOMContentLoaded', main);
