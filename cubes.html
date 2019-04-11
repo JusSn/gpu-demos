@@ -4,9 +4,10 @@
 <meta name="viewport" content="width=1000">
 <title>Web GPU Cubes demo</title>
 <script src="scripts/gl-matrix-min.js"></script>
+<link rel="stylesheet" href="css/style.css"/>
 </head>
 <body>
-<canvas height=1000 width=1000></canvas>
+<canvas></canvas>
 <script>
 const mvpBindingNum             = 0;
 const normalBindingNum          = 1;
@@ -235,6 +236,9 @@ window.addEventListener("load", init, false);
 
 async function init() {
     const canvas = document.querySelector('canvas');
+    let canvasSize = canvas.getBoundingClientRect();
+    canvas.width = canvasSize.width;
+    canvas.height = canvasSize.height;
 
     const aspect = Math.abs(canvas.width / canvas.height);
     mat4.perspective(projectionMatrix, kFOVY, aspect, 0.1, 100.0);

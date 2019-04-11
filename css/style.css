@@ -1,8 +1,23 @@
 /* This demo is based on webgl-compute-bitonicSort, found at https://github.com/9ballsyndrome/WebGL_Compute_shader. */
 
 body {
-    font-family: sans-serif;
-    font-size: 1.25rem;
+    background-color: rgb(35%, 65%, 85%);
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+}
+
+body.error canvas {
+    display: none;
 }
 
 h1 {
