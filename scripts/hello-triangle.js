@@ -6,11 +6,6 @@ async function helloTriangle() {
 
     const adapter = await window.gpu.requestAdapter();
     const device = await adapter.requestDevice();
-
-    if (!device) {
-        document.body.className = 'error';
-        return;
-    }
     
     /*** Shader Setup ***/
     
@@ -70,6 +65,9 @@ async function helloTriangle() {
     const vertexWriteArray = new Float32Array(vertexArrayBuffer);
     vertexWriteArray.set([
         // x, y, z, w, r, g, b, a
+        0, 0.8, 0, 1, 0, 1, 1, 1,
+        -0.8, -0.8, 0, 1, 1, 1, 0, 1,
+        0.8, -0.8, 0, 1, 1, 0, 1, 1
     ]);
     vertexBuffer.unmap();
     
@@ -108,7 +106,7 @@ async function helloTriangle() {
     
     /* GPUBlendDescriptors */
     const alphaBlendDescriptor = { srcFactor: "one", dstFactor: "zero", operation: "add" };
-    const colorBlendDescriptor = { srcFacotr: "one", dstFactor: "zero", operation: "add" };
+    const colorBlendDescriptor = { srcFactor: "one", dstFactor: "zero", operation: "add" };
     
     /* GPUColorStateDescriptor */
     const colorStateDescriptor = {
@@ -135,7 +133,7 @@ async function helloTriangle() {
     let canvasSize = canvas.getBoundingClientRect();
     canvas.width = canvasSize.width;
     canvas.height = canvasSize.height;
-    
+
     const gpuContext = canvas.getContext("gpu");
     
     /* GPUSwapChainDescriptor */
@@ -153,14 +151,14 @@ async function helloTriangle() {
     const renderAttachment = swapChainTexture.createDefaultView();
     
     /* GPUColor */
-    const green = { r: 0, g: 1, b: 0, a: 1 };
+    const darkBlue = { r: 0, g: 0, b: 0.5, a: 1 };
     
     /* GPURenderPassColorATtachmentDescriptor */
     const colorAttachmentDescriptor = {
         attachment: renderAttachment,
         loadOp: "clear",
         storeOp: "store",
-        clearColor: green
+        clearColor: darkBlue
     };
     
     /* GPURenderPassDescriptor */
