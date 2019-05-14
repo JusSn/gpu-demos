@@ -31,13 +31,13 @@ const main = async () => {
   // Div setup
   logElement = document.getElementById('log');
 
-  if (!window.gpu) {
+  if (!navigator.gpu) {
     document.body.className = 'error';
     return;
   }
 
   // Create GPUDevice
-  const adapter = await gpu.requestAdapter();
+  const adapter = await navigator.gpu.requestAdapter();
   device = await adapter.requestDevice();
 
   compute();

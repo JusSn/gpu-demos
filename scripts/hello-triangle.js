@@ -1,10 +1,10 @@
 async function helloTriangle() {
-    if (!window.gpu) {
+    if (!navigator.gpu) {
         document.body.className = 'error';
         return;
     }
 
-    const adapter = await window.gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter();
     const device = await adapter.requestDevice();
     
     /*** Shader Setup ***/
@@ -137,9 +137,9 @@ async function helloTriangle() {
     const gpuContext = canvas.getContext("gpu");
     
     /* GPUSwapChainDescriptor */
-    const swapChainDescriptor = { context: gpuContext, format: "bgra8unorm" };
+    const swapChainDescriptor = { device: device, format: "bgra8unorm" };
     /* GPUSwapChain */
-    const swapChain = device.createSwapChain(swapChainDescriptor);
+    const swapChain = gpuContext.configureSwapChain(swapChainDescriptor);
     
     /*** Render Pass Setup ***/
     

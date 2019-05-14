@@ -246,7 +246,7 @@ async function init() {
 
     const context = canvas.getContext('gpu');
 
-    const adapter = await gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter();
     device = await adapter.requestDevice();
 
     const swapChainDescriptor = {

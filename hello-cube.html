@@ -121,7 +121,7 @@ function createVerticesArray() {
 }
 
 async function init() {
-    const adapter = await gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter();
     device = await adapter.requestDevice();
 
     const canvas = document.querySelector('canvas');
@@ -135,10 +135,10 @@ async function init() {
     const context = canvas.getContext('gpu');
 
     const swapChainDescriptor = { 
-        context: context, 
+        device: device, 
         format: "bgra8unorm"
     };
-    swapChain = device.createSwapChain(swapChainDescriptor);
+    swapChain = context.configureSwapChain(swapChainDescriptor);
 
     // WebKit WebGPU accepts only MSL for now.
     const shaderModuleDescriptor = { code: shader };
