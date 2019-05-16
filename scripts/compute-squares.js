@@ -9,7 +9,10 @@ let selectBox;
 
 let device;
 const dataBinding = 0;
+const uniformsBinding = 1;
 const bindGroupIndex = 0;
+const uniformsGroupIndex = 1;
+
 
 const main = async () => {
   // Selector setup
@@ -58,10 +61,7 @@ const compute = async () => {
 
 const computeCPU = async (arr) => {
   const now = performance.now();
-  arr.sort((a, b) => {
-      return a - b;
-    }
-  );
+  arr.sort((a, b) => { return a - b; });
   log(`CPU sort time: ${Math.round(performance.now() - now)} ms`);
   console.log(`CPU sort result validation: ${validateSorted(arr) ? 'success' : 'failure'}`);
   console.log(arr);
@@ -71,8 +71,8 @@ const computeGPU = async (arr) => {
   const now = performance.now();
 
   const shaderModule = createComputeShader(arr.length);
-  const pipeline = device.createComputePipeline({ 
-    computeStage: { module: shaderModule, entryPoint: "sort_main" } 
+  const pipeline0 = device.createComputePipeline({ 
+    computeStage: { module: shaderModule, entryPoint: "sort_0" } 
   });
   
   const dataBuffer = device.createBuffer({ 
@@ -92,20 +92,60 @@ const computeGPU = async (arr) => {
     }]
   });
 
+  const pipeline1 = device.createComputePipeline({
+    computeStage: { module: shaderModule, entryPoint: "sort_1" }
+  });
+
+  const uniformsBufferSize = 2 * Uint32Array.BYTES_PER_ELEMENT;
+  const uniformsBuffer = device.createBuffer({
+    size: uniformsBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.TRANSFER_DST
+  });
+
+  const uniformsBindGroupLayout = device.createBindGroupLayout({
+    bindings: [{ binding: uniformsBinding, visibility: GPUShaderStageBit.COMPUTE, type: "storage-buffer" }]
+  });
+
+  const uniformsBindGroup = device.createBindGroup({
+    layout: uniformsBindGroupLayout,
+    bindings: [{
+      binding: uniformsBinding,
+      resource: { buffer: uniformsBuffer, offset: 0, size: uniformsBufferSize }
+    }]
+  });
+
   const commandEncoder = device.createCommandEncoder();
-  const passEncoder = commandEncoder.beginComputePass();
+  let passEncoder = commandEncoder.beginComputePass();
   passEncoder.setBindGroup(bindGroupIndex, dataBindGroup);
-  passEncoder.setPipeline(pipeline);
+  passEncoder.setPipeline(pipeline0);
 
   const threadgroupsPerGrid = Math.max(1, arr.length / MAX_THREAD_NUM);
   passEncoder.dispatch(threadgroupsPerGrid, 1, 1);
   passEncoder.endPass();
 
+  if (threadgroupsPerGrid > 1) {
+    let numElementsArray = new Uint32Array(2);
+
+    for (let k = threadgroupsPerGrid; k <= arr.length; k <<= 1) {
+      for (let j = k >> 1; j > 0; j >>= 1) {
+        numElementsArray[0] = k;
+        numElementsArray[1] = j;
+        uniformsBuffer.setSubData(0, numElementsArray.buffer);
+
+        passEncoder = commandEncoder.beginComputePass();
+        passEncoder.setBindGroup(bindGroupIndex, dataBindGroup);
+        passEncoder.setBindGroup(uniformsGroupIndex, uniformsBindGroup);
+        passEncoder.setPipeline(pipeline1);
+        passEncoder.dispatch(threadgroupsPerGrid, 1, 1);
+        passEncoder.endPass();
+      }
+    }
+  }
+
   device.getQueue().submit([commandEncoder.finish()]);
 
   // get result
   const resultArrayBuffer = await dataBuffer.mapReadAsync();
-  log(`GPU square time: ${Math.round(performance.now() - now)} ms`);
+  log(`GPU sort time: ${Math.round(performance.now() - now)} ms`);
   const result = new Uint32Array(resultArrayBuffer);
   console.log(`GPU sort result validation: ${validateSorted(result) ? 'success' : 'failure'}`);
   console.log(result);
@@ -122,7 +162,6 @@ const validateSorted = (arr) => {
   for (let i = 0; i < length; i++) {
     if (i !== length - 1 && arr[i] > arr[i + 1]) {
       console.log('validation error:', i, arr[i], arr[i + 1]);
-      console.log(arr);
       return false;
     }
   }
@@ -132,21 +171,80 @@ const validateSorted = (arr) => {
 const createComputeShader = (length) => {
   // FIXME: Replace with non-MSL.
   return device.createShaderModule({ code: `
-    #include <metal_stdlib>
+  #include <metal_stdlib>
 
-    struct Data {
-        device unsigned* numbers [[id(${dataBinding})]];
-    };
-
-    kernel void sort_main(device Data& data [[buffer(${bindGroupIndex})]], unsigned gid [[thread_position_in_grid]])
-    {
-        if (gid >= ${length})
-            return;
-
-        unsigned original = data.numbers[gid];
-        data.numbers[gid] = original * original;
-    }
-    ` 
+  struct Data {
+      device unsigned* numbers [[id(${dataBinding})]];
+  };
+  
+  threadgroup unsigned sharedData[${MAX_THREAD_NUM}];
+  
+  kernel
+  void sort_0(device Data& data         [[buffer(${bindGroupIndex})]],
+              unsigned globalID         [[thread_position_in_grid]],
+              unsigned localID          [[thread_position_in_threadgroup]],
+              unsigned threadgroupID    [[threadgroup_position_in_grid]],
+              unsigned threadgroupSize  [[threads_per_threadgroup]])
+  {
+      sharedData[localID] = data.numbers[globalID];
+      threadgroup_barrier(mem_threadgroup);
+      threadgroup_barrier(mem_none);
+      
+      unsigned offset = threadgroupID * threadgroupSize;
+      
+      unsigned temp;
+      for (unsigned k = 2; k <= threadGroupSize; k <<= 1) {
+          for (unsigned j = k >> 1; j > 0; j >>= 1) {
+              unsigned ixj = (globalID ^ j) - offset;
+              if (ixj > localID) {
+                  if ((globalID & k) == 0) {
+                      if (sharedData[localID] > sharedData[ixj]) {
+                          temp = sharedData[localID];
+                          sharedData[localID] = sharedData[ixj];
+                          sharedData[ixj] = temp;
+                      }
+                  } else {
+                      if (sharedData[localID] < sharedData[ixj]) {
+                          temp = sharedData[localID];
+                          sharedData[localID] = sharedData[ixj];
+                          sharedData[ixj] = temp;
+                      }
+                  }
+              }
+              threadgroup_barrier(mem_threadgroup);
+              threadgroup_barrier(mem_none);
+          }
+      }
+      data.numbers[globalID] = sharedData[localID];
+  }
+  
+  struct Uniform {
+      device unsigned* numElements [[id(${uniformsBinding})]];
+  };
+  
+  kernel
+  void sort_1(device Data& data           [[buffer(${bindGroupIndex})]],
+              device Uniform& uniforms    [[buffer(${uniformsGroupIndex})]],
+              unsigned globalID           [[thread_position_in_grid]])
+  {
+      unsigned temp;
+      unsigned ixj = globalID ^ uniforms.numElements[1];
+      if (ixj > globalID) {
+          if ((globalID & uniforms.numElements[0]) == 0) {
+              if (data.numbers[globalID] > data.numbers[ixj]) {
+                  temp = data.numbers[globalID] = data.numbers[ixj];
+                  data.numbers[globalID] = data.numbers[ixj];
+                  data.numbers[ixj] = temp;
+              }
+          } else {
+              if (data.numbers[globalID] < data.numbers[ixj]) {
+                  temp = data.numbers[globalID] = data.numbers[ixj];
+                  data.numbers[globalID] = data.numbers[ixj];
+                  data.numbers[ixj] = temp;
+              }
+          }
+      }
+  }`
   });
 }
 
