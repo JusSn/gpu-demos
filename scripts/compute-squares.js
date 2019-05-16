@@ -70,8 +70,6 @@ const computeCPU = async (arr) => {
 const computeGPU = async (arr) => {
   const now = performance.now();
 
-  // const threadgroupsPerGrid = Math.max(1, length / MAX_THREAD_NUM);
-
   const shaderModule = createComputeShader(arr.length);
   const pipeline = device.createComputePipeline({ 
     computeStage: { module: shaderModule, entryPoint: "sort_main" } 
@@ -98,7 +96,9 @@ const computeGPU = async (arr) => {
   const passEncoder = commandEncoder.beginComputePass();
   passEncoder.setBindGroup(bindGroupIndex, dataBindGroup);
   passEncoder.setPipeline(pipeline);
-  passEncoder.dispatch(arr.length, 1, 1);
+
+  const threadgroupsPerGrid = Math.max(1, arr.length / MAX_THREAD_NUM);
+  passEncoder.dispatch(threadgroupsPerGrid, 1, 1);
   passEncoder.endPass();
 
   device.getQueue().submit([commandEncoder.finish()]);
