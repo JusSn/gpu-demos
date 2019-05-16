@@ -45,7 +45,7 @@ const main = async () => {
 
 const compute = async () => {
   const length = getLength(selectBox.selectedIndex);
-  console.log(`square test: ${length}`);
+  console.log(`sort test: ${length}`);
   const arr = new Uint32Array(length);
   resetData(arr);
 
@@ -58,10 +58,12 @@ const compute = async () => {
 
 const computeCPU = async (arr) => {
   const now = performance.now();
-  arr.forEach((value, index) => {
-    arr[index] = value * value;
-  });
-  log(`CPU square time: ${Math.round(performance.now() - now)} ms`)
+  arr.sort((a, b) => {
+      return a - b;
+    }
+  );
+  log(`CPU sort time: ${Math.round(performance.now() - now)} ms`);
+  console.log(`CPU sort result validation: ${validateSorted(arr) ? 'success' : 'failure'}`);
   console.log(arr);
 };
 
@@ -72,7 +74,7 @@ const computeGPU = async (arr) => {
 
   const shaderModule = createComputeShader(arr.length);
   const pipeline = device.createComputePipeline({ 
-    computeStage: { module: shaderModule, entryPoint: "squares_main" } 
+    computeStage: { module: shaderModule, entryPoint: "sort_main" } 
   });
   
   const dataBuffer = device.createBuffer({ 
@@ -105,7 +107,7 @@ const computeGPU = async (arr) => {
   const resultArrayBuffer = await dataBuffer.mapReadAsync();
   log(`GPU square time: ${Math.round(performance.now() - now)} ms`);
   const result = new Uint32Array(resultArrayBuffer);
-  console.log(result.length == arr.length);
+  console.log(`GPU sort result validation: ${validateSorted(result) ? 'success' : 'failure'}`);
   console.log(result);
 };
 
@@ -113,6 +115,18 @@ const resetData = (arr) => {
   arr.forEach((v, index) => {
     arr[index] = Math.floor(Math.random() * Math.floor(MAX_ORIGINAL_VALUE));
   });
+};
+
+const validateSorted = (arr) => {
+  const length = arr.length;
+  for (let i = 0; i < length; i++) {
+    if (i !== length - 1 && arr[i] > arr[i + 1]) {
+      console.log('validation error:', i, arr[i], arr[i + 1]);
+      console.log(arr);
+      return false;
+    }
+  }
+  return true;
 };
 
 const createComputeShader = (length) => {
@@ -124,7 +138,7 @@ const createComputeShader = (length) => {
         device unsigned* numbers [[id(${dataBinding})]];
     };
 
-    kernel void squares_main(device Data& data [[buffer(${bindGroupIndex})]], unsigned gid [[thread_position_in_grid]])
+    kernel void sort_main(device Data& data [[buffer(${bindGroupIndex})]], unsigned gid [[thread_position_in_grid]])
     {
         if (gid >= ${length})
             return;
