@@ -2,7 +2,7 @@
 
 const MAX_THREAD_NUM = 1024;
 const MAX_GROUP_NUM = 2048;
-const MAX_ORIGINAL_VALUE = 94906265; // Largest safe square root in JS.
+const MAX_ORIGINAL_VALUE = 64; // 94906265; // Largest safe square root in JS.
 
 let logElement;
 let selectBox;
@@ -23,6 +23,7 @@ const main = async () => {
     option.text = '' + getLength(i);
     selectBox.add(option);
   }
+
   selectBox.selectedIndex = 7;
   selectBox.addEventListener('change', () => {
     logElement.innerText = '';
@@ -67,6 +68,21 @@ const computeCPU = async (arr) => {
   console.log(arr);
 };
 
+function createBufferWithData(device, descriptor, data, offset = 0) {
+  const mappedBuffer = device.createBufferMapped(descriptor);
+  const dataArray = new Uint8Array(mappedBuffer[1]);
+  dataArray.set(new Uint8Array(data), offset);
+  mappedBuffer[0].unmap();
+  return mappedBuffer[0];
+}
+
+async function mapWriteDataToBuffer(buffer, data, offset = 0) {
+  const arrayBuffer = await buffer.mapWriteAsync();
+  const writeArray = new Uint8Array(arrayBuffer);
+  writeArray.set(new Uint8Array(data), offset);
+  buffer.unmap();
+}
+
 const computeGPU = async (arr) => {
   const now = performance.now();
 
@@ -75,10 +91,9 @@ const computeGPU = async (arr) => {
     computeStage: { module: shaderModule, entryPoint: "sort_0" } 
   });
   
-  const dataBuffer = device.createBuffer({ 
-    size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.TRANSFER_DST | GPUBufferUsage.MAP_READ
-  });
-  dataBuffer.setSubData(0, arr.buffer);
+  const dataBuffer = createBufferWithData(device, { 
+    size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ
+  }, arr.buffer);
 
   const dataBindGroupLayout = device.createBindGroupLayout({ 
     bindings: [{ binding: dataBinding, visibility: GPUShaderStageBit.COMPUTE, type: "storage-buffer" }]
@@ -98,7 +113,7 @@ const computeGPU = async (arr) => {
 
   const uniformsBufferSize = 2 * Uint32Array.BYTES_PER_ELEMENT;
   const uniformsBuffer = device.createBuffer({
-    size: uniformsBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.TRANSFER_DST
+    size: uniformsBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_WRITE
   });
 
   const uniformsBindGroupLayout = device.createBindGroupLayout({
@@ -129,7 +144,7 @@ const computeGPU = async (arr) => {
       for (let j = k >> 1; j > 0; j >>= 1) {
         numElementsArray[0] = k;
         numElementsArray[1] = j;
-        uniformsBuffer.setSubData(0, numElementsArray.buffer);
+        await mapWriteDataToBuffer(uniformsBuffer, numElementsArray.buffer);
 
         passEncoder = commandEncoder.beginComputePass();
         passEncoder.setBindGroup(bindGroupIndex, dataBindGroup);
@@ -173,11 +188,11 @@ const createComputeShader = (length) => {
   return device.createShaderModule({ code: `
   #include <metal_stdlib>
 
+  using namespace metal;
+
   struct Data {
       device unsigned* numbers [[id(${dataBinding})]];
   };
-  
-  threadgroup unsigned sharedData[${MAX_THREAD_NUM}];
   
   kernel
   void sort_0(device Data& data         [[buffer(${bindGroupIndex})]],
@@ -186,14 +201,16 @@ const createComputeShader = (length) => {
               unsigned threadgroupID    [[threadgroup_position_in_grid]],
               unsigned threadgroupSize  [[threads_per_threadgroup]])
   {
+      threadgroup unsigned sharedData[${MAX_THREAD_NUM}];
+
       sharedData[localID] = data.numbers[globalID];
-      threadgroup_barrier(mem_threadgroup);
-      threadgroup_barrier(mem_none);
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      threadgroup_barrier(mem_flags::mem_none);
       
       unsigned offset = threadgroupID * threadgroupSize;
       
       unsigned temp;
-      for (unsigned k = 2; k <= threadGroupSize; k <<= 1) {
+      for (unsigned k = 2; k <= threadgroupSize; k <<= 1) {
           for (unsigned j = k >> 1; j > 0; j >>= 1) {
               unsigned ixj = (globalID ^ j) - offset;
               if (ixj > localID) {
@@ -211,8 +228,8 @@ const createComputeShader = (length) => {
                       }
                   }
               }
-              threadgroup_barrier(mem_threadgroup);
-              threadgroup_barrier(mem_none);
+              threadgroup_barrier(mem_flags::mem_threadgroup);
+              threadgroup_barrier(mem_flags::mem_none);
           }
       }
       data.numbers[globalID] = sharedData[localID];
@@ -249,7 +266,8 @@ const createComputeShader = (length) => {
 }
 
 const getLength = (index) => {
-  return 1 << (index + 10);
+  //return 1 << (index + 10);
+  return 128;
 };
 
 const log = (str) => {
