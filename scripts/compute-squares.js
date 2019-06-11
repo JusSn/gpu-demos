@@ -2,7 +2,7 @@
 
 const MAX_THREAD_NUM = 1024;
 const MAX_GROUP_NUM = 2048;
-const MAX_ORIGINAL_VALUE = 64; // 94906265; // Largest safe square root in JS.
+const MAX_ORIGINAL_VALUE = 4096; 
 
 let logElement;
 let selectBox;
@@ -12,7 +12,6 @@ const dataBinding = 0;
 const uniformsBinding = 1;
 const bindGroupIndex = 0;
 const uniformsGroupIndex = 1;
-
 
 const main = async () => {
   // Selector setup
@@ -67,21 +66,6 @@ const computeCPU = async (arr) => {
   console.log(`CPU sort result validation: ${validateSorted(arr) ? 'success' : 'failure'}`);
   console.log(arr);
 };
-
-function createBufferWithData(device, descriptor, data, offset = 0) {
-  const mappedBuffer = device.createBufferMapped(descriptor);
-  const dataArray = new Uint8Array(mappedBuffer[1]);
-  dataArray.set(new Uint8Array(data), offset);
-  mappedBuffer[0].unmap();
-  return mappedBuffer[0];
-}
-
-async function mapWriteDataToBuffer(buffer, data, offset = 0) {
-  const arrayBuffer = await buffer.mapWriteAsync();
-  const writeArray = new Uint8Array(arrayBuffer);
-  writeArray.set(new Uint8Array(data), offset);
-  buffer.unmap();
-}
 
 const computeGPU = async (arr) => {
   const now = performance.now();
@@ -183,7 +167,7 @@ const validateSorted = (arr) => {
   return true;
 };
 
-const createComputeShader = (length) => {
+const createComputeShader = () => {
   // FIXME: Replace with non-MSL.
   return device.createShaderModule({ code: `
   #include <metal_stdlib>
@@ -249,13 +233,13 @@ const createComputeShader = (length) => {
       if (ixj > globalID) {
           if ((globalID & uniforms.numElements[0]) == 0) {
               if (data.numbers[globalID] > data.numbers[ixj]) {
-                  temp = data.numbers[globalID] = data.numbers[ixj];
+                  temp = data.numbers[globalID];
                   data.numbers[globalID] = data.numbers[ixj];
                   data.numbers[ixj] = temp;
               }
           } else {
               if (data.numbers[globalID] < data.numbers[ixj]) {
-                  temp = data.numbers[globalID] = data.numbers[ixj];
+                  temp = data.numbers[globalID];
                   data.numbers[globalID] = data.numbers[ixj];
                   data.numbers[ixj] = temp;
               }
@@ -266,12 +250,26 @@ const createComputeShader = (length) => {
 }
 
 const getLength = (index) => {
-  //return 1 << (index + 10);
-  return 128;
+  return 1 << (index + 10);
 };
 
 const log = (str) => {
   logElement.innerText += str + '\n';
 };
+
+function createBufferWithData(device, descriptor, data, offset = 0) {
+  const mappedBuffer = device.createBufferMapped(descriptor);
+  const dataArray = new Uint8Array(mappedBuffer[1]);
+  dataArray.set(new Uint8Array(data), offset);
+  mappedBuffer[0].unmap();
+  return mappedBuffer[0];
+}
+
+async function mapWriteDataToBuffer(buffer, data, offset = 0) {
+  const arrayBuffer = await buffer.mapWriteAsync();
+  const writeArray = new Uint8Array(arrayBuffer);
+  writeArray.set(new Uint8Array(data), offset);
+  buffer.unmap();
+}
 
 window.addEventListener('DOMContentLoaded', main);
