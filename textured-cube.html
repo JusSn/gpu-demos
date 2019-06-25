@@ -152,7 +152,8 @@ async function init() {
     verticesWriteArray.set(verticesArray);
     verticesBuffer.unmap();
 
-    // Input state. Model will change soon to adopt one of https://github.com/kainino0x/gpuweb/pull/2/'s ideas.
+    // Vertex Input
+    
     const positionAttributeDescriptor = {
         shaderLocation: positionAttributeNum,  // [[attribute(0)]].
         offset: 0,
