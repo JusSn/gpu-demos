@@ -10,47 +10,71 @@
 <canvas></canvas>
 <script>
 const positionAttributeNum  = 0;
-const colorAttritbuteNum = 1;
+const colorAttributeNum = 1;
 
 const transformBindingNum   = 0;
 
 const bindGroupIndex        = 0;
 
+// const shader = `
+// #include <metal_stdlib>
+
+// using namespace metal;
+
+// struct Vertex
+// {
+//     float4 position [[attribute(${positionAttributeNum})]];
+//     float4 color [[attribute(${colorAttributeNum})]];
+// };
+
+// struct FragmentData
+// {
+//     float4 position [[position]];
+//     float4 color;
+// };
+
+// struct Uniform
+// {
+//     device float4x4* modelViewProjectionMatrix [[id(${transformBindingNum})]];
+// };
+
+// vertex FragmentData vertex_main(Vertex vertexIn [[stage_in]],
+//                             const device Uniform& uniforms [[buffer(${bindGroupIndex})]])
+// {
+//     FragmentData output;
+//     output.position = uniforms.modelViewProjectionMatrix[0] * vertexIn.position;
+//     output.color = vertexIn.color;
+
+//     return output;
+// }
+
+// fragment float4 fragment_main(FragmentData data [[stage_in]])
+// {
+//     return data.color;
+// }
+// `;
+
 const shader = `
-#include <metal_stdlib>
-
-using namespace metal;
-
-struct Vertex
-{
-    float4 position [[attribute(${positionAttributeNum})]];
-    float4 color [[attribute(${colorAttritbuteNum})]];
-};
-
-struct FragmentData
-{
-    float4 position [[position]];
-    float4 color;
-};
-
-struct Uniform
-{
-    device float4x4* modelViewProjectionMatrix [[id(${transformBindingNum})]];
-};
-
-vertex FragmentData vertex_main(Vertex vertexIn [[stage_in]],
-                            const device Uniform& uniforms [[buffer(${bindGroupIndex})]])
-{
-    FragmentData output;
-    output.position = uniforms.modelViewProjectionMatrix[0] * vertexIn.position;
-    output.color = vertexIn.color;
-
-    return output;
+struct FragmentData {
+    float4 position : SV_Position;
+    float4 color : attribute(${colorAttributeNum});
 }
 
-fragment float4 fragment_main(FragmentData data [[stage_in]])
+vertex FragmentData vertex_main(
+    float4 position : attribute(${positionAttributeNum}), 
+    float4 color : attribute(${colorAttributeNum}), 
+    constant float4x4[] modelViewProjectionMatrix : register(b${transformBindingNum}))
 {
-    return data.color;
+    FragmentData out;
+    out.position = mul(modelViewProjectionMatrix[0], position);
+    out.color = color;
+    
+    return out;
+}
+
+fragment float4 fragment_main(float4 color : attribute(${colorAttributeNum})) : SV_Target 0
+{
+    return color;
 }
 `;
 
@@ -124,8 +148,8 @@ async function init() {
     };
     swapChain = context.configureSwapChain(swapChainDescriptor);
 
-    // WebKit WebGPU accepts only MSL for now.
-    const shaderModuleDescriptor = { code: shader };
+    // const shaderModuleDescriptor = { code: shader };
+    const shaderModuleDescriptor = { code: shader, isWHLSL: true };
     const shaderModule = device.createShaderModule(shaderModuleDescriptor);
 
     const verticesBufferDescriptor = { 
@@ -140,14 +164,13 @@ async function init() {
     verticesBuffer.unmap();
 
     // Vertex Input
-    
     const positionAttributeDescriptor = {
         shaderLocation: positionAttributeNum,  // [[attribute(0)]].
         offset: 0,
         format: "float4"
     };
     const colorAttributeDescriptor = {
-        shaderLocation: colorAttritbuteNum,
+        shaderLocation: colorAttributeNum,
         offset: colorOffset,
         format: "float4"
     }
