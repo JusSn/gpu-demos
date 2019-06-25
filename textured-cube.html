@@ -16,7 +16,6 @@ const transformBindingNum   = 0;
 const textureBindingNum     = 1;
 const samplerBindingNum     = 2;
 
-const vertexBufferIndex     = 0;
 const bindGroupIndex        = 0;
 
 const shader = `
@@ -358,22 +357,23 @@ async function init() {
 
 /* Transform Buffers and Bindings */
 const transformSize = 4 * 16;
-function updateTransformArray(array) {
-    let viewMatrix = mat4.create();
-    mat4.translate(viewMatrix, viewMatrix, vec3.fromValues(0, 0, -5));
-    let now = Date.now() / 1000;
-    mat4.rotate(viewMatrix, viewMatrix, 1, vec3.fromValues(Math.sin(now), Math.cos(now), 0));
-    let modelViewProjectionMatrix = mat4.create();
-    mat4.multiply(modelViewProjectionMatrix, projectionMatrix, viewMatrix);
-    for (let i = 0; i < 16; i++) {
-        array[i] = modelViewProjectionMatrix[i];
-    }
-}
 
 const transformBufferDescriptor = {
     size: transformSize,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.MAP_WRITE
 };
+
+let mappedGroups = [];
+
+function render() {
+    if (mappedGroups.length === 0) {
+        const [buffer, arrayBuffer] = device.createBufferMapped(transformBufferDescriptor);
+        const group = device.createBindGroup(createBindGroupDescriptor(buffer, textureViewBinding, samplerBinding));
+        let mappedGroup = { buffer: buffer, arrayBuffer: arrayBuffer, bindGroup: group };
+        drawCommands(mappedGroup);
+    } else
+        drawCommands(mappedGroups.shift());
+}
 
 function createBindGroupDescriptor(transformBuffer, textureViewBinding, samplerBinding) {
     const transformBufferBinding = {
@@ -391,21 +391,6 @@ function createBindGroupDescriptor(transformBuffer, textureViewBinding, samplerB
     };
 }
 
-let mappedGroups = [];
-
-function render() {
-    if (mappedGroups.length == 0) {
-        const buffer = device.createBuffer(transformBufferDescriptor);
-        buffer.mapWriteAsync().then(arrayBuffer => {
-            const group = device.createBindGroup(createBindGroupDescriptor(buffer, textureViewBinding, samplerBinding));
-
-            let mappedGroup = { buffer: buffer, arrayBuffer: arrayBuffer, bindGroup: group };
-            drawCommands(mappedGroup);
-        });
-    } else
-        drawCommands(mappedGroups.shift());
-}
-
 function drawCommands(mappedGroup) {
     updateTransformArray(new Float32Array(mappedGroup.arrayBuffer));
     mappedGroup.buffer.unmap();
@@ -416,7 +401,7 @@ function drawCommands(mappedGroup) {
     // Encode drawing commands.
     passEncoder.setPipeline(pipeline);
     // Vertex attributes
-    passEncoder.setVertexBuffers(vertexBufferIndex, [verticesBuffer], [0]);
+    passEncoder.setVertexBuffers(0, [verticesBuffer], [0]);
     // Bind groups
     passEncoder.setBindGroup(bindGroupIndex, mappedGroup.bindGroup);
     passEncoder.draw(36, 1, 0, 0);
@@ -433,7 +418,19 @@ function drawCommands(mappedGroup) {
     requestAnimationFrame(render);
 }
 
-init();
+function updateTransformArray(array) {
+    let viewMatrix = mat4.create();
+    mat4.translate(viewMatrix, viewMatrix, vec3.fromValues(0, 0, -5));
+    let now = Date.now() / 1000;
+    mat4.rotate(viewMatrix, viewMatrix, 1, vec3.fromValues(Math.sin(now), Math.cos(now), 0));
+    let modelViewProjectionMatrix = mat4.create();
+    mat4.multiply(modelViewProjectionMatrix, projectionMatrix, viewMatrix);
+    for (let i = 0; i < 16; i++) {
+        array[i] = modelViewProjectionMatrix[i];
+    }
+}
+
+window.addEventListener("load", init);
 </script>
 </body>
 </html>
