@@ -38,7 +38,28 @@ async function helloTriangle() {
         return in.color;
     }
     `;
-    const shaderModule = device.createShaderModule({ code: shaderSource });
+    const whlslSource = `
+    struct FragmentData {
+        float4 position : SV_Position;
+        float4 color : attribute(${colorLocation});
+    }
+
+    vertex FragmentData vertexMain(float4 position : attribute(${positionLocation}), float4 color : attribute(${colorLocation}))
+    {
+        FragmentData out;
+
+        out.position = position;
+        out.color = color;
+
+        return out;
+    }
+
+    fragment float4 fragmentMain(float4 color : attribute(${colorLocation})) : SV_Target 0
+    {
+        return color;
+    }
+    `;
+    const shaderModule = device.createShaderModule({ code: whlslSource, isWHLSL: true });
     
     /* GPUPipelineStageDescriptors */
     const vertexStageDescriptor = { module: shaderModule, entryPoint: "vertexMain" };
@@ -52,12 +73,12 @@ async function helloTriangle() {
     const vertexDataSize = vertexStride * 3;
     
     /* GPUBufferDescriptor */
-    const vertexBufferDescriptor = { 
+    const vertexDataBufferDescriptor = { 
         size: vertexDataSize,
         usage: GPUBufferUsage.MAP_WRITE | GPUBufferUsage.VERTEX
     };
     /* GPUBuffer */
-    const vertexBuffer = device.createBuffer(vertexBufferDescriptor);
+    const vertexBuffer = device.createBuffer(vertexDataBufferDescriptor);
     
     /*** Write Data To GPU ***/
     
@@ -78,28 +99,24 @@ async function helloTriangle() {
     /* GPUVertexAttributeDescriptors */
     const positionAttribute = {
         shaderLocation: positionLocation,
-        inputSlot: vertexBufferSlot,
         offset: 0,
         format: "float4"
     };
     const colorAttribute = {
         shaderLocation: colorLocation,
-        inputSlot: vertexBufferSlot,
         offset: colorOffset,
         format: "float4"
     };
-    
+
+    /* GPUVertexBufferDescriptor */
+    const vertexBufferDescriptor = {
+        stride: vertexStride,
+        attributeSet: [positionAttribute, colorAttribute]
+    };
+
     /* GPUVertexInputDescriptor */
     const vertexInputDescriptor = {
-        inputSlot: vertexBufferSlot,
-        stride: vertexStride,
-        stepMode: "vertex"
-    };
-    
-    /* GPUInputStateDescriptor */
-    const inputStateDescriptor = {
-        attributes: [positionAttribute, colorAttribute],
-        inputs: [vertexInputDescriptor]
+        vertexBuffers: [vertexBufferDescriptor]
     };
     
     /*** Finish Pipeline State ***/
@@ -122,7 +139,7 @@ async function helloTriangle() {
         fragmentStage: fragmentStageDescriptor,
         primitiveTopology: "triangle-list",
         colorStates: [colorStateDescriptor],
-        inputState: inputStateDescriptor
+        vertexInput: vertexInputDescriptor
     };
     /* GPURenderPipeline */
     const renderPipeline = device.createRenderPipeline(renderPipelineDescriptor);
