@@ -73,52 +73,50 @@ let projectionMatrix = mat4.create();
 
 const texCoordsOffset = 4 * 4;
 const vertexSize = 4 * 6;
-function createVerticesArray() {
-    return new Float32Array([
-        // float4 position, float2 texCoords
-        1, -1, 1, 1, 1, 0, 
-        -1, -1, 1, 1, 0, 0, 
-        -1, -1, -1, 1, 0, 1, 
-        1, -1, -1, 1, 1, 1,
-        1, -1, 1, 1, 1, 0,
-        -1, -1, -1, 1, 0, 1,
+const verticesArray = new Float32Array([
+    // float4 position, float2 texCoords
+    1, -1, 1, 1, 1, 0, 
+    -1, -1, 1, 1, 0, 0, 
+    -1, -1, -1, 1, 0, 1, 
+    1, -1, -1, 1, 1, 1,
+    1, -1, 1, 1, 1, 0,
+    -1, -1, -1, 1, 0, 1,
 
-        1, 1, 1, 1, 0, 0,
-        1, -1, 1, 1, 0, 1,
-        1, -1, -1, 1, 1, 1,
-        1, 1, -1, 1, 1, 0,
-        1, 1, 1, 1, 0, 0,
-        1, -1, -1, 1, 1, 1,
+    1, 1, 1, 1, 0, 0,
+    1, -1, 1, 1, 0, 1,
+    1, -1, -1, 1, 1, 1,
+    1, 1, -1, 1, 1, 0,
+    1, 1, 1, 1, 0, 0,
+    1, -1, -1, 1, 1, 1,
 
-        -1, 1, 1, 1, 0, 1,
-        1, 1, 1, 1, 1, 1,
-        1, 1, -1, 1, 1, 0,
-        -1, 1, -1, 1, 0, 0,
-        -1, 1, 1, 1, 0, 1,
-        1, 1, -1, 1, 1, 0,
+    -1, 1, 1, 1, 0, 1,
+    1, 1, 1, 1, 1, 1,
+    1, 1, -1, 1, 1, 0,
+    -1, 1, -1, 1, 0, 0,
+    -1, 1, 1, 1, 0, 1,
+    1, 1, -1, 1, 1, 0,
 
-        -1, -1, 1, 1, 1, 1,
-        -1, 1, 1, 1, 1, 0,
-        -1, 1, -1, 1, 0, 0,
-        -1, -1, -1, 1, 0, 1,
-        -1, -1, 1, 1, 1, 1,
-        -1, 1, -1, 1, 0, 0,
+    -1, -1, 1, 1, 1, 1,
+    -1, 1, 1, 1, 1, 0,
+    -1, 1, -1, 1, 0, 0,
+    -1, -1, -1, 1, 0, 1,
+    -1, -1, 1, 1, 1, 1,
+    -1, 1, -1, 1, 0, 0,
 
-        1, 1, 1, 1, 1, 0,
-        -1, 1, 1, 1, 0, 0,
-        -1, -1, 1, 1, 0, 1,
-        -1, -1, 1, 1, 0, 1,
-        1, -1, 1, 1, 1, 1,
-        1, 1, 1, 1, 1, 0,
+    1, 1, 1, 1, 1, 0,
+    -1, 1, 1, 1, 0, 0,
+    -1, -1, 1, 1, 0, 1,
+    -1, -1, 1, 1, 0, 1,
+    1, -1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 0,
 
-        1, -1, -1, 1, 0, 1,
-        -1, -1, -1, 1, 1, 1,
-        -1, 1, -1, 1, 1, 0,
-        1, 1, -1, 1, 0, 0,
-        1, -1, -1, 1, 0, 1,
-        -1, 1, -1, 1, 1, 0,
-    ]);
-}
+    1, -1, -1, 1, 0, 1,
+    -1, -1, -1, 1, 1, 1,
+    -1, 1, -1, 1, 1, 0,
+    1, 1, -1, 1, 0, 0,
+    1, -1, -1, 1, 0, 1,
+    -1, 1, -1, 1, 1, 0,
+]);
 
 async function init() {
     const adapter = await navigator.gpu.requestAdapter();
@@ -144,37 +142,34 @@ async function init() {
     const shaderModuleDescriptor = { code: shader };
     const shaderModule = device.createShaderModule(shaderModuleDescriptor);
 
-    const verticesArray = createVerticesArray();
     const verticesBufferDescriptor = { 
         size: verticesArray.byteLength, 
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.TRANSFER_DST
     };
-    verticesBuffer = device.createBuffer(verticesBufferDescriptor);
-    verticesBuffer.setSubData(0, verticesArray.buffer);
+    let verticesArrayBuffer;
+    [verticesBuffer, verticesArrayBuffer] = device.createBufferMapped(verticesBufferDescriptor);
+
+    const verticesWriteArray = new Float32Array(verticesArrayBuffer);
+    verticesWriteArray.set(verticesArray);
+    verticesBuffer.unmap();
 
     // Input state. Model will change soon to adopt one of https://github.com/kainino0x/gpuweb/pull/2/'s ideas.
     const positionAttributeDescriptor = {
         shaderLocation: positionAttributeNum,  // [[attribute(0)]].
-        inputSlot: vertexBufferIndex,       // Used as vertex buffer index in Metal.
         offset: 0,
         format: "float4"
     };
     const texCoordsAttributeDescriptor = {
         shaderLocation: texCoordsAttributeNum,
-        inputSlot: vertexBufferIndex,
         offset: texCoordsOffset,
         format: "float2"
     }
     const vertexBufferDescriptor = {
-        inputSlot: vertexBufferIndex,
+        attributeSet: [positionAttributeDescriptor, texCoordsAttributeDescriptor],
         stride: vertexSize,
         stepMode: "vertex"
     };
-    const inputStateDescriptor = {
-        indexFormat: "uint32",
-        attributes: [positionAttributeDescriptor, texCoordsAttributeDescriptor], 
-        inputs: [vertexBufferDescriptor]
-    };
+    const vertexInputDescriptor = { vertexBuffers: [vertexBufferDescriptor] };
 
     // Texture
 
@@ -216,8 +211,11 @@ async function init() {
         size: imageData.data.length,
         usage: GPUBufferUsage.TRANSFER_SRC | GPUBufferUsage.TRANSFER_DST
     };
-    const textureDataBuffer = device.createBuffer(textureDataBufferDescriptor);
-    textureDataBuffer.setSubData(0, imageData.data.buffer);
+    const [textureDataBuffer, textureArrayBuffer] = device.createBufferMapped(textureDataBufferDescriptor);
+    
+    const textureWriteArray = new Uint8Array(textureArrayBuffer);
+    textureWriteArray.set(imageData.data);
+    textureDataBuffer.unmap();
 
     const dataCopyView = {
         buffer: textureDataBuffer,
@@ -310,7 +308,7 @@ async function init() {
         primitiveTopology: "triangle-list",
         colorStates: [colorState],
         depthStencilState: depthStateDescriptor,
-        inputState: inputStateDescriptor
+        vertexInput: vertexInputDescriptor
     };
     pipeline = device.createRenderPipeline(pipelineDescriptor);
 

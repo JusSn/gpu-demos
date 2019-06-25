@@ -13,31 +13,32 @@ async function helloTriangle() {
     const positionLocation = 0;
     const colorLocation = 1;
     
-    const shaderSource = `
-    #include <metal_stdlib>
+    // const shaderSource = `
+    // #include <metal_stdlib>
   
-    using namespace metal;
+    // using namespace metal;
   
-    struct Vertex {
-        float4 position [[attribute(${positionLocation})]];
-        float4 color [[attribute(${colorLocation})]];
-    };
+    // struct Vertex {
+    //     float4 position [[attribute(${positionLocation})]];
+    //     float4 color [[attribute(${colorLocation})]];
+    // };
   
-    struct FragmentData {
-        float4 position [[position]];
-        float4 color;
-    };
+    // struct FragmentData {
+    //     float4 position [[position]];
+    //     float4 color;
+    // };
   
-    vertex FragmentData vertexMain(const Vertex in [[stage_in]]) 
-    {
-        return FragmentData { in.position, in.color };
-    }
+    // vertex FragmentData vertexMain(const Vertex in [[stage_in]]) 
+    // {
+    //     return FragmentData { in.position, in.color };
+    // }
   
-    fragment float4 fragmentMain(const FragmentData in [[stage_in]])
-    {
-        return in.color;
-    }
-    `;
+    // fragment float4 fragmentMain(const FragmentData in [[stage_in]])
+    // {
+    //     return in.color;
+    // }
+    // `;
+    // const shaderModule = device.createShaderModule({ code: shaderSource });
     const whlslSource = `
     struct FragmentData {
         float4 position : SV_Position;
