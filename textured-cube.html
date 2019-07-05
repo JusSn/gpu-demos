@@ -19,53 +19,31 @@ const samplerBindingNum     = 2;
 const bindGroupIndex        = 0;
 
 const shader = `
-#include <metal_stdlib>
-
-using namespace metal;
-
-struct Vertex
-{
-    float4 position [[attribute(${positionAttributeNum})]];
-    float2 texCoords [[attribute(${texCoordsAttributeNum})]];
-};
-
-struct FragmentData
-{
-    float4 position [[position]];
-    float2 texCoords;
-};
-
-struct Uniform
-{
-    device float4x4* modelViewProjectionMatrix [[id(${transformBindingNum})]];
-};
-
-struct SampledTexture
-{
-    texture2d<float> faceTexture [[id(${textureBindingNum})]];
-    sampler faceSampler [[id(${samplerBindingNum})]];
-};
-
-vertex FragmentData vertex_main(Vertex vertexIn [[stage_in]],
-                            const device Uniform& uniforms [[buffer(${bindGroupIndex})]])
-{
-    FragmentData output;
-    output.position = uniforms.modelViewProjectionMatrix[0] * vertexIn.position;
-    output.texCoords = vertexIn.texCoords;
-
-    return output;
+struct FragmentData {
+    float4 position : SV_Position;
+    float2 texCoords : attribute(${texCoordsAttributeNum});
 }
 
-fragment float4 fragment_main(FragmentData data [[stage_in]],
-                            const device SampledTexture& args [[buffer(${bindGroupIndex})]])
+vertex FragmentData vertex_main(
+    float4 position : attribute(${positionAttributeNum}), 
+    float2 texCoords : attribute(${texCoordsAttributeNum}), 
+    constant float4x4[] modelViewProjectionMatrix : register(b${transformBindingNum}))
 {
-    float4 color = args.faceTexture.sample(args.faceSampler, data.texCoords);
-    if (color.a < 1)
-        discard_fragment();
-
-    return color;
+    FragmentData out;
+    out.position = mul(modelViewProjectionMatrix[0], position);
+    out.texCoords = texCoords;
+    
+    return out;
 }
-`
+
+fragment float4 fragment_main(
+    float2 texCoords : attribute(${texCoordsAttributeNum}),
+    Texture2D<float4> faceTexture : register(t${textureBindingNum}),
+    sampler faceSampler : register(s${samplerBindingNum})) : SV_Target 0
+{
+    return Sample(faceTexture, faceSampler, texCoords);
+}
+`;
 
 let device, swapChain, verticesBuffer, bindGroupLayout, pipeline, renderPassDescriptor, queue, textureViewBinding, samplerBinding;
 let projectionMatrix = mat4.create();
@@ -138,7 +116,7 @@ async function init() {
     swapChain = context.configureSwapChain(swapChainDescriptor);
 
     // WebKit WebGPU accepts only MSL for now.
-    const shaderModuleDescriptor = { code: shader };
+    const shaderModuleDescriptor = { code: shader, isWHLSL: true };
     const shaderModule = device.createShaderModule(shaderModuleDescriptor);
 
     const verticesBufferDescriptor = { 
@@ -177,7 +155,7 @@ async function init() {
     const image = new Image();
     const imageLoadPromise = new Promise(resolve => { 
         image.onload = () => resolve(); 
-        image.src = "resources/safari-alpha.png"
+        image.src = "resources/safari-opaque.png"
     });
     await Promise.resolve(imageLoadPromise);
 
@@ -426,9 +404,27 @@ function updateTransformArray(array) {
     mat4.rotate(viewMatrix, viewMatrix, 1, vec3.fromValues(Math.sin(now), Math.cos(now), 0));
     let modelViewProjectionMatrix = mat4.create();
     mat4.multiply(modelViewProjectionMatrix, projectionMatrix, viewMatrix);
-    for (let i = 0; i < 16; i++) {
-        array[i] = modelViewProjectionMatrix[i];
-    }
+    transposeCopy(array, modelViewProjectionMatrix);
+}
+
+function transposeCopy(out, input)
+{
+    out[0] = input[0];
+    out[1] = input[4];
+    out[2] = input[8];
+    out[3] = input[12];
+    out[4] = input[1];
+    out[5] = input[5];
+    out[6] = input[9];
+    out[7] = input[13];
+    out[8] = input[2];
+    out[9] = input[6];
+    out[10] = input[10];
+    out[11] = input[14];
+    out[12] = input[3];
+    out[13] = input[7];
+    out[14] = input[11];
+    out[15] = input[15];
 }
 
 window.addEventListener("load", init);
