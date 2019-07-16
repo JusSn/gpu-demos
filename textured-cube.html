@@ -155,7 +155,7 @@ async function init() {
     const image = new Image();
     const imageLoadPromise = new Promise(resolve => { 
         image.onload = () => resolve(); 
-        image.src = "resources/safari-opaque.png"
+        image.src = "resources/safari-alpha.png"
     });
     await Promise.resolve(imageLoadPromise);
 
@@ -401,30 +401,10 @@ function updateTransformArray(array) {
     let viewMatrix = mat4.create();
     mat4.translate(viewMatrix, viewMatrix, vec3.fromValues(0, 0, -5));
     let now = Date.now() / 1000;
-    mat4.rotate(viewMatrix, viewMatrix, 1, vec3.fromValues(Math.sin(now), Math.cos(now), 0));
+    mat4.rotate(viewMatrix, viewMatrix, 1, vec3.fromValues(Math.cos(now), 1, 1));
     let modelViewProjectionMatrix = mat4.create();
     mat4.multiply(modelViewProjectionMatrix, projectionMatrix, viewMatrix);
-    transposeCopy(array, modelViewProjectionMatrix);
-}
-
-function transposeCopy(out, input)
-{
-    out[0] = input[0];
-    out[1] = input[4];
-    out[2] = input[8];
-    out[3] = input[12];
-    out[4] = input[1];
-    out[5] = input[5];
-    out[6] = input[9];
-    out[7] = input[13];
-    out[8] = input[2];
-    out[9] = input[6];
-    out[10] = input[10];
-    out[11] = input[14];
-    out[12] = input[3];
-    out[13] = input[7];
-    out[14] = input[11];
-    out[15] = input[15];
+    mat4.copy(array, modelViewProjectionMatrix);
 }
 
 window.addEventListener("load", init);
