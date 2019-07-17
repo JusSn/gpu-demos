@@ -71,9 +71,6 @@ const computeGPU = async (arr) => {
   const now = performance.now();
 
   const shaderModule = createComputeShader(arr.length);
-  const pipeline0 = device.createComputePipeline({ 
-    computeStage: { module: shaderModule, entryPoint: "sort_0" } 
-  });
   
   const dataBuffer = createBufferWithData(device, { 
     size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ
@@ -91,9 +88,20 @@ const computeGPU = async (arr) => {
     }]
   });
 
-  const pipeline1 = device.createComputePipeline({
-    computeStage: { module: shaderModule, entryPoint: "sort_1" }
+  const pipelineLayout0 = device.createPipelineLayout({ bindGroupLayouts: [dataBindGroupLayout ]});
+
+  device.pushErrorScope("validation");
+
+  const pipeline0 = device.createComputePipeline({
+    layout: pipelineLayout0,
+    computeStage: { module: shaderModule, entryPoint: "sort_0" } 
   });
+
+  let error = await device.popErrorScope();
+  if (error) {
+    console.log(error.message);
+    return;
+  }
 
   const uniformsBufferSize = 2 * Uint32Array.BYTES_PER_ELEMENT;
   const uniformsBuffer = device.createBuffer({
@@ -111,6 +119,21 @@ const computeGPU = async (arr) => {
       resource: { buffer: uniformsBuffer, offset: 0, size: uniformsBufferSize }
     }]
   });
+
+  const pipelineLayout1 = device.createPipelineLayout({ bindGroupLayouts: [dataBindGroupLayout, uniformsBindGroupLayout] });
+
+  device.pushErrorScope("validation");
+
+  const pipeline1 = device.createComputePipeline({
+    layout: pipelineLayout1,
+    computeStage: { module: shaderModule, entryPoint: "sort_1" }
+  });
+
+  error = await device.popErrorScope();
+  if (error) {
+    console.log(error.message);
+    return;
+  }
 
   const commandEncoder = device.createCommandEncoder();
   let passEncoder = commandEncoder.beginComputePass();
@@ -168,6 +191,71 @@ const validateSorted = (arr) => {
 };
 
 const createComputeShader = () => {
+  return device.createShaderModule({ code: `
+  [numthreads(${MAX_THREAD_NUM}, 1, 1)]
+  compute void sort_0(device unsigned[] numbers : register(u${dataBinding}),
+                      unsigned globalID         : SV_DispatchThreadID,
+                      unsigned localID          : SV_GroupThreadID,
+                      unsigned threadgroupID    : SV_GroupID)
+  {
+      threadgroup unsigned[] sharedData[${MAX_THREAD_NUM}];
+
+      sharedData[localID.x] = data.numbers[globalID.x];
+      GroupMemoryBarrierWithGroupSync();
+      AllMemoryBarrierWithGroupSync();
+
+      unsigned offset = threadgroupID * ${MAX_THREAD_NUM};
+
+      unsigned temp;
+      for (unsigned k = 2; k <= ${MAX_THREAD_NUM}; k <<= 1) {
+          for (unsigned j = k >> 1; j > 0; j >>= 1) {
+              unsigned ixj = (globalID.x ^ j) - offset;
+              if (ixj > localID.x) {
+                  if ((globalID.x & k) == 0) {
+                      if (sharedData[localID.x] > sharedData[ixj]) {
+                          temp = sharedData[localID.x];
+                          sharedData[localID.x] = sharedData[ixj];
+                          sharedData[ixj] = temp;
+                      }
+                  } else {
+                      if (sharedData[localID.x] < sharedData[ixj]) {
+                          temp = sharedData[localID.x];
+                          sharedData[localID.x] = sharedData[ixj];
+                          sharedData[ixj] = temp;
+                      }
+                  }
+              }
+              GroupMemoryBarrierWithGroupSync();
+              AllMemoryBarrierWithGroupSync();
+          }
+      }
+      data.numbers[globalID.x] = sharedData[localID.x];
+  }
+
+  [numthreads(${MAX_THREAD_NUM}, 1, 1)]
+  compute void sort_1(device unsigned[] numbers     : register(u${bindGroupIndex}),
+                      device unsigned[] numElements : register(u${uniformsGroupIndex}),
+                      unsigned globalID             : SV_DispatchThreadID)
+  {
+      unsigned temp;
+      unsigned ixj = globalID.x ^ uniforms.numElements[1];
+      if (ixj > globalID.x) {
+          if ((globalID.x & uniforms.numElements[0]) == 0) {
+              if (data.numbers[globalID.x] > data.numbers[ixj]) {
+                  temp = data.numbers[globalID.x];
+                  data.numbers[globalID.x] = data.numbers[ixj];
+                  data.numbers[ixj] = temp;
+              }
+          } else {
+              if (data.numbers[globalID.x] < data.numbers[ixj]) {
+                  temp = data.numbers[globalID.x];
+                  data.numbers[globalID.x] = data.numbers[ixj];
+                  data.numbers[ixj] = temp;
+              }
+          }
+      }
+  }
+  `, isWHLSL: true});
   // FIXME: Replace with non-MSL.
   return device.createShaderModule({ code: `
   #include <metal_stdlib>
@@ -247,7 +335,7 @@ const createComputeShader = () => {
       }
   }`
   });
-}
+};
 
 const getLength = (index) => {
   return 1 << (index + 10);
