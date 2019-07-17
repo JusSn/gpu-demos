@@ -110,7 +110,7 @@ async function init() {
     };
     swapChain = context.configureSwapChain(swapChainDescriptor);
 
-    const shaderModuleDescriptor = { code: shader };
+    const shaderModuleDescriptor = { code: shader, isWHLSL: true };
     const shaderModule = device.createShaderModule(shaderModuleDescriptor);
 
     const verticesBufferDescriptor = { 
