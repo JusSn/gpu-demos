@@ -1,7 +1,6 @@
 /* This demo is based on webgl-compute-bitonicSort, found at https://github.com/9ballsyndrome/WebGL_Compute_shader. */
 
 body {
-    background-color: rgb(35%, 65%, 85%);
     margin: 0;
     padding: 0;
     height: 100vh;
@@ -12,8 +11,7 @@ body {
 
 canvas {
     display: block;
-    width: 100vw;
-    height: 100vh;
+    padding: 20px;
 }
 
 body.error canvas {

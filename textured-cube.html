@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="css/style.css"/>
 </head>
 <body>
-<canvas></canvas>
+<canvas width="600" height="600" style="width: 600px; height: 600px;"></canvas>
 <script>
 const positionAttributeNum  = 0;
 const texCoordsAttributeNum = 1;
@@ -100,9 +100,6 @@ async function init() {
     device = await adapter.requestDevice();
 
     const canvas = document.querySelector('canvas');
-    let canvasSize = canvas.getBoundingClientRect();
-    canvas.width = canvasSize.width;
-    canvas.height = canvasSize.height;
 
     const aspect = Math.abs(canvas.width / canvas.height);
     mat4.perspective(projectionMatrix, (2 * Math.PI) / 5, aspect, 1, 100.0);

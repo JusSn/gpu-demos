@@ -12,33 +12,7 @@ async function helloTriangle() {
     /* GPUShaderModule */
     const positionLocation = 0;
     const colorLocation = 1;
-    
-    // const shaderSource = `
-    // #include <metal_stdlib>
-  
-    // using namespace metal;
-  
-    // struct Vertex {
-    //     float4 position [[attribute(${positionLocation})]];
-    //     float4 color [[attribute(${colorLocation})]];
-    // };
-  
-    // struct FragmentData {
-    //     float4 position [[position]];
-    //     float4 color;
-    // };
-  
-    // vertex FragmentData vertexMain(const Vertex in [[stage_in]]) 
-    // {
-    //     return FragmentData { in.position, in.color };
-    // }
-  
-    // fragment float4 fragmentMain(const FragmentData in [[stage_in]])
-    // {
-    //     return in.color;
-    // }
-    // `;
-    // const shaderModule = device.createShaderModule({ code: shaderSource });
+
     const whlslSource = `
     struct FragmentData {
         float4 position : SV_Position;
@@ -148,9 +122,8 @@ async function helloTriangle() {
     /*** Swap Chain Setup ***/
     
     const canvas = document.querySelector("canvas");
-    let canvasSize = canvas.getBoundingClientRect();
-    canvas.width = canvasSize.width;
-    canvas.height = canvasSize.height;
+    canvas.width = 600;
+    canvas.height = 600;
 
     const gpuContext = canvas.getContext("gpu");
     
