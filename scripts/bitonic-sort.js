@@ -70,7 +70,8 @@ const computeCPU = async (arr) => {
 const computeGPU = async (arr) => {
   const now = performance.now();
 
-  const shaderModule = createComputeShader(arr.length);
+  const shaderModule0 = createComputeShader0();
+  const shaderModule1 = createComputeShader1();
   
   const dataBuffer = createBufferWithData(device, { 
     size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ
@@ -88,13 +89,13 @@ const computeGPU = async (arr) => {
     }]
   });
 
-  const pipelineLayout0 = device.createPipelineLayout({ bindGroupLayouts: [dataBindGroupLayout ]});
+  const pipelineLayout0 = device.createPipelineLayout({ bindGroupLayouts: [dataBindGroupLayout]});
 
   device.pushErrorScope("validation");
 
   const pipeline0 = device.createComputePipeline({
     layout: pipelineLayout0,
-    computeStage: { module: shaderModule, entryPoint: "sort_0" } 
+    computeStage: { module: shaderModule0, entryPoint: "sort_0" } 
   });
 
   let error = await device.popErrorScope();
@@ -124,10 +125,11 @@ const computeGPU = async (arr) => {
 
   device.pushErrorScope("validation");
 
-  const pipeline1 = device.createComputePipeline({
-    layout: pipelineLayout1,
-    computeStage: { module: shaderModule, entryPoint: "sort_1" }
-  });
+  // const pipeline1 = device.createComputePipeline({
+  //   layout: pipelineLayout1,
+  //   computeStage: { module: shaderModule1, entryPoint: "sort_1" }
+  // });
+  let pipeline1;
 
   error = await device.popErrorScope();
   if (error) {
@@ -190,67 +192,86 @@ const validateSorted = (arr) => {
   return true;
 };
 
-const createComputeShader = () => {
+const createComputeShader0 = () => {
   return device.createShaderModule({ code: `
   [numthreads(${MAX_THREAD_NUM}, 1, 1)]
-  compute void sort_0(device unsigned[] numbers : register(u${dataBinding}),
-                      unsigned globalID         : SV_DispatchThreadID,
-                      unsigned localID          : SV_GroupThreadID,
-                      unsigned threadgroupID    : SV_GroupID)
+  compute void sort_0(device uint[] numbers : register(u${dataBinding}),
+                      float3 globalID       : SV_DispatchThreadID,
+                      float3 localID        : SV_GroupThreadID,
+                      float3 threadgroupID  : SV_GroupID) 
   {
-      threadgroup unsigned[] sharedData[${MAX_THREAD_NUM}];
+      uint localIndex = uint(localID.x);
+      uint globalIndex = uint(globalID.x);
+      uint threadgroupIndex = uint(threadgroupID.x);
+    
+      threadgroup uint[${MAX_THREAD_NUM}] sharedData;
 
-      sharedData[localID.x] = data.numbers[globalID.x];
+      uint num = numbers[globalIndex];
+      sharedData[localIndex] = num;
+
       GroupMemoryBarrierWithGroupSync();
       AllMemoryBarrierWithGroupSync();
 
-      unsigned offset = threadgroupID * ${MAX_THREAD_NUM};
-
-      unsigned temp;
-      for (unsigned k = 2; k <= ${MAX_THREAD_NUM}; k <<= 1) {
-          for (unsigned j = k >> 1; j > 0; j >>= 1) {
-              unsigned ixj = (globalID.x ^ j) - offset;
-              if (ixj > localID.x) {
-                  if ((globalID.x & k) == 0) {
-                      if (sharedData[localID.x] > sharedData[ixj]) {
-                          temp = sharedData[localID.x];
-                          sharedData[localID.x] = sharedData[ixj];
-                          sharedData[ixj] = temp;
-                      }
-                  } else {
-                      if (sharedData[localID.x] < sharedData[ixj]) {
-                          temp = sharedData[localID.x];
-                          sharedData[localID.x] = sharedData[ixj];
-                          sharedData[ixj] = temp;
+      uint offset = threadgroupIndex * ${MAX_THREAD_NUM};
+      uint temp;
+      for (uint k = 2; k <= ${MAX_THREAD_NUM}; k <<= 1) {
+          for (uint j = k >> 1; j > 0; j >>= 1) {
+              uint ixj = (globalIndex ^ j) - offset;
+              if (ixj > localIndex) {
+                  if ((globalIndex & k) == 0) {
+                      if (sharedData[localIndex] > sharedData[ixj]) {
+                          temp = sharedData[localIndex];
                       }
                   }
               }
-              GroupMemoryBarrierWithGroupSync();
-              AllMemoryBarrierWithGroupSync();
           }
       }
-      data.numbers[globalID.x] = sharedData[localID.x];
-  }
+  }`, isWHLSL: true });
+  // {
 
+  //                         temp = sharedData[localIndex];
+  //                         sharedData[localIndex] = sharedData[ixj];
+  //                         sharedData[ixj] = temp;
+  //                     }
+  //                 } else {
+  //                     if (sharedData[localIndex] < sharedData[ixj]) {
+  //                         temp = sharedData[localIndex];
+  //                         sharedData[localIndex] = sharedData[ixj];
+  //                         sharedData[ixj] = temp;
+  //                     }
+  //                 }
+  //             }
+  //             GroupMemoryBarrierWithGroupSync();
+  //             AllMemoryBarrierWithGroupSync();
+  //         }
+  //     }
+  //     data.numbers[globalIndex] = sharedData[localIndex];
+  // }
+  // `, isWHLSL: true});
+};
+
+const createComputeShader1 = () => {
+  return device.createShaderModule({ code: `
   [numthreads(${MAX_THREAD_NUM}, 1, 1)]
-  compute void sort_1(device unsigned[] numbers     : register(u${bindGroupIndex}),
-                      device unsigned[] numElements : register(u${uniformsGroupIndex}),
-                      unsigned globalID             : SV_DispatchThreadID)
+  compute void sort_1(device uint[] numbers     : register(u${bindGroupIndex}),
+                      device uint[] numElements : register(u${uniformsGroupIndex}),
+                      float3 globalID             : SV_DispatchThreadID)
   {
-      unsigned temp;
-      unsigned ixj = globalID.x ^ uniforms.numElements[1];
-      if (ixj > globalID.x) {
-          if ((globalID.x & uniforms.numElements[0]) == 0) {
-              if (data.numbers[globalID.x] > data.numbers[ixj]) {
-                  temp = data.numbers[globalID.x];
-                  data.numbers[globalID.x] = data.numbers[ixj];
-                  data.numbers[ixj] = temp;
+      uint globalIndex = uint(globalID.x);
+      uint temp;
+      uint ixj = globalIndex ^ numElements[1];
+      if (ixj > globalIndex) {
+          if ((globalIndex & numElements[0]) == 0) {
+              if (numbers[globalIndex] > numbers[ixj]) {
+                  temp = numbers[globalIndex];
+                  numbers[globalIndex] = numbers[ixj];
+                  numbers[ixj] = temp;
               }
           } else {
-              if (data.numbers[globalID.x] < data.numbers[ixj]) {
-                  temp = data.numbers[globalID.x];
-                  data.numbers[globalID.x] = data.numbers[ixj];
-                  data.numbers[ixj] = temp;
+              if (numbers[globalIndex] < numbers[ixj]) {
+                  temp = numbers[globalIndex];
+                  numbers[globalIndex] = numbers[ixj];
+                  numbers[ixj] = temp;
               }
           }
       }
