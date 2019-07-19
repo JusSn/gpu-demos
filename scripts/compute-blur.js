@@ -2,16 +2,17 @@ const threadsPerThreadgroup = 32;
 
 const originalBufferBindingNum = 0;
 const outputBufferBindingNum = 1;
-const weightsBufferBindingNum = 2;
+const uniformsBufferBindingNum = 2;
 
-const weights = [
+const uniforms = [
+    4,
     0.2270270270,
     0.1945945946,
     0.1216216216,
     0.0540540541,
     0.0162162162,
 ];
-const weightsBufferSize = weights.length * Float32Array.BYTES_PER_ELEMENT;
+const uniformsBufferSize = uniforms.length * Float32Array.BYTES_PER_ELEMENT;
 
 function init() {
     if (!navigator.gpu) {
@@ -66,10 +67,10 @@ async function computeBlur(radius) {
     const outputBuffer = device.createBuffer({ size: imageLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ });
 
     // Create uniforms buffer
-    const [weightsBuffer, weightsArrayBuffer] = device.createBufferMapped({ size: weightsBufferSize, usage: GPUBufferUsage.UNIFORM });
-    const weightsWriteArray = new Float32Array(weightsArrayBuffer);
-    weightsWriteArray.set(weights);
-    weightsBuffer.unmap();
+    const [uniformsBuffer, uniformsArrayBuffer] = device.createBufferMapped({ size: uniformsBufferSize, usage: GPUBufferUsage.UNIFORM });
+    const uniformsWriteArray = new Float32Array(uniformsArrayBuffer);
+    uniformsWriteArray.set(uniforms);
+    uniformsBuffer.unmap();
 
     // Bind buffers to kernel   
     const bindGroupLayout = device.createBindGroupLayout({
@@ -82,7 +83,7 @@ async function computeBlur(radius) {
             visibility: GPUShaderStageBit.COMPUTE,
             type: "storage-buffer"
         }, {
-            binding: weightsBufferBindingNum,
+            binding: uniformsBufferBindingNum,
             visibility: GPUShaderStageBit.COMPUTE,
             type: "uniform-buffer"
         }]
@@ -103,10 +104,10 @@ async function computeBlur(radius) {
                 size: imageLength
             }
         }, {
-            binding: weightsBufferBindingNum,
+            binding: uniformsBufferBindingNum,
             resource: {
-                buffer: weightsBuffer,
-                size: weightsBufferSize
+                buffer: uniformsBuffer,
+                size: uniformsBufferSize
             }
         }]
     });
@@ -114,7 +115,7 @@ async function computeBlur(radius) {
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
 
     // Set up pipelines
-    const shaderModule = device.createShaderModule({ code: createShaderCode(image, radius), isWHLSL: true });
+    const shaderModule = device.createShaderModule({ code: createShaderCode(image), isWHLSL: true });
 
     device.pushErrorScope("validation");
 
@@ -170,7 +171,7 @@ window.addEventListener("load", init);
 
 const byteMask = (1 << 8) - 1;
 
-function createShaderCode(image, radius) {
+function createShaderCode(image) {
     return `
 uint getR(uint rgba)
 {
@@ -211,9 +212,10 @@ uint verticallyOffsetIndex(uint index, int offset)
 [numthreads(${threadsPerThreadgroup}, 1, 1)]
 compute void horizontal(constant uint[] origBuffer : register(u${originalBufferBindingNum}),
                         device uint[] outputBuffer : register(u${outputBufferBindingNum}),
-                        constant float[] weights : register(b${weightsBufferBindingNum}),
+                        constant float[] uniforms : register(b${uniformsBufferBindingNum}),
                         float3 dispatchThreadID : SV_DispatchThreadID)
 {
+    int radius = int(uniforms[0]);
     uint globalIndex = uint(dispatchThreadID.y) * ${image.width} + uint(dispatchThreadID.x);
 
     uint r = 0;
@@ -221,9 +223,9 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
     uint b = 0;
     uint a = 0;
 
-    for (int i = -${radius}; i <= ${radius}; ++i) {
+    for (int i = -radius; i <= radius; ++i) {
         uint startColor = origBuffer[uint(int(globalIndex) + i)];
-        float weight = weights[uint(abs(i))];
+        float weight = uniforms[uint(abs(i) + 1)];
         r += uint(float(getR(startColor)) * weight);
         g += uint(float(getG(startColor)) * weight);
         b += uint(float(getB(startColor)) * weight);
@@ -236,9 +238,10 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
 [numthreads(1, ${threadsPerThreadgroup}, 1)]
 compute void vertical(device uint[] origBuffer : register(u${originalBufferBindingNum}),
                         constant uint[] middleBuffer : register(u${outputBufferBindingNum}),
-                        constant float[] weights : register(b${weightsBufferBindingNum}),
+                        constant float[] uniforms : register(b${uniformsBufferBindingNum}),
                         float3 dispatchThreadID : SV_DispatchThreadID)
 {
+    int radius = int(uniforms[0]);
     uint globalIndex = uint(dispatchThreadID.x) * ${image.height} + uint(dispatchThreadID.y);
 
     uint r = 0;
@@ -246,9 +249,9 @@ compute void vertical(device uint[] origBuffer : register(u${originalBufferBindi
     uint b = 0;
     uint a = 0;
 
-    for (int i = -${radius}; i <= ${radius}; ++i) {
+    for (int i = -radius; i <= radius; ++i) {
         uint startColor = middleBuffer[verticallyOffsetIndex(globalIndex, i)];
-        float weight = weights[uint(abs(i))];
+        float weight = uniforms[uint(abs(i) + 1)];
         r += uint(float(getR(startColor)) * weight);
         g += uint(float(getG(startColor)) * weight);
         b += uint(float(getB(startColor)) * weight);
