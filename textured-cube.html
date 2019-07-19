@@ -184,7 +184,7 @@ async function init() {
 
     const textureDataBufferDescriptor = {
         size: imageData.data.length,
-        usage: GPUBufferUsage.TRANSFER_SRC | GPUBufferUsage.TRANSFER_DST
+        usage: GPUBufferUsage.TRANSFER_SRC
     };
     const [textureDataBuffer, textureArrayBuffer] = device.createBufferMapped(textureDataBufferDescriptor);
     
