@@ -13,12 +13,25 @@ const weights = [
 ];
 const weightsBufferSize = weights.length * Float32Array.BYTES_PER_ELEMENT;
 
-async function computeBlur() {
+function init() {
     if (!navigator.gpu) {
         document.body.className = 'error';
         return;
     }
 
+    const slider = document.getElementById("radiusSlider");
+    const button = document.getElementById("blurButton");
+
+    button.onclick = async () => {
+        button.disabled = true;
+        slider.disabled = true;
+        await computeBlur(4);
+        button.disabled = false;
+        slider.disabled = false;
+    };
+}
+
+async function computeBlur(radius) {
     const adapter = await navigator.gpu.requestAdapter();
     const device = await adapter.requestDevice();
 
@@ -101,7 +114,7 @@ async function computeBlur() {
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
 
     // Set up pipelines
-    const shaderModule = device.createShaderModule({ code: createShaderCode(image), isWHLSL: true });
+    const shaderModule = device.createShaderModule({ code: createShaderCode(image, radius), isWHLSL: true });
 
     device.pushErrorScope("validation");
 
@@ -151,14 +164,13 @@ async function computeBlur() {
     context2d.putImageData(new ImageData(resultArray, image.width, image.height), 0, 0);
 }
 
-window.addEventListener("load", computeBlur);
+window.addEventListener("load", init);
 
 /* Shaders */
 
-const blurRadius = 4;
 const byteMask = (1 << 8) - 1;
 
-function createShaderCode(image) {
+function createShaderCode(image, radius) {
     return `
 uint getR(uint rgba)
 {
@@ -209,7 +221,7 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
     uint b = 0;
     uint a = 0;
 
-    for (int i = -${blurRadius}; i <= ${blurRadius}; ++i) {
+    for (int i = -${radius}; i <= ${radius}; ++i) {
         uint startColor = origBuffer[uint(int(globalIndex) + i)];
         float weight = weights[uint(abs(i))];
         r += uint(float(getR(startColor)) * weight);
@@ -234,7 +246,7 @@ compute void vertical(device uint[] origBuffer : register(u${originalBufferBindi
     uint b = 0;
     uint a = 0;
 
-    for (int i = -${blurRadius}; i <= ${blurRadius}; ++i) {
+    for (int i = -${radius}; i <= ${radius}; ++i) {
         uint startColor = middleBuffer[verticallyOffsetIndex(globalIndex, i)];
         float weight = weights[uint(abs(i))];
         r += uint(float(getR(startColor)) * weight);

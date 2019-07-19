@@ -8,9 +8,14 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<img src=resources/safari-opaque.png></img>
-
-<canvas></canvas>
+<div id="demo">
+    <img src=resources/safari-opaque.png></img> 
+    <canvas></canvas>
+    <div class="slidecontainer">
+        <input type="range" min="1" max="10" value="4" class="slider" id="radiusSlider">
+        <input type="button" value="Blur!" id="blurButton">
+    </div>
+</div>
 <div id="error">
     <h2>Web GPU not available</h2>
     <p>
