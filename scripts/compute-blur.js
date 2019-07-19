@@ -4,16 +4,6 @@ const originalBufferBindingNum = 0;
 const outputBufferBindingNum = 1;
 const uniformsBufferBindingNum = 2;
 
-const uniforms = [
-    4,
-    0.2270270270,
-    0.1945945946,
-    0.1216216216,
-    0.0540540541,
-    0.0162162162,
-];
-const uniformsBufferSize = uniforms.length * Float32Array.BYTES_PER_ELEMENT;
-
 function init() {
     if (!navigator.gpu) {
         document.body.className = 'error';
@@ -31,6 +21,8 @@ function init() {
         slider.disabled = false;
     };
 }
+
+let uniformsCache = new Map();
 
 async function computeBlur(radius) {
     const adapter = await navigator.gpu.requestAdapter();
@@ -67,6 +59,13 @@ async function computeBlur(radius) {
     const outputBuffer = device.createBuffer({ size: imageLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ });
 
     // Create uniforms buffer
+    let uniforms = uniformsCache.get(radius);
+    if (uniforms === undefined) {
+        uniforms = calculateWeights(radius);
+        uniformsCache.set(radius, uniforms);
+    }
+    const uniformsBufferSize = uniforms.length * Float32Array.BYTES_PER_ELEMENT;
+
     const [uniformsBuffer, uniformsArrayBuffer] = device.createBufferMapped({ size: uniformsBufferSize, usage: GPUBufferUsage.UNIFORM });
     const uniformsWriteArray = new Float32Array(uniformsArrayBuffer);
     uniformsWriteArray.set(uniforms);
@@ -167,7 +166,32 @@ async function computeBlur(radius) {
 
 window.addEventListener("load", init);
 
-/* Shaders */
+/* Helpers */
+
+function calculateWeights(radius)
+{
+    const sigma = radius / 2.0;
+	const twoSigma2 = 2.0 * sigma * sigma;
+
+    let weights = [radius];
+	
+	let weightSum = 0;
+
+	for (let i = -radius; i <= radius; ++i)
+	{
+        const weight = Math.exp(-i * i / twoSigma2);
+        weightSum += weight;
+        if (i >= 0)
+            weights.push(weight);
+    }
+
+	for (let i = 1; i < weights.length; ++i)
+	{
+		weights[i] /= weightSum;
+	}
+
+	return weights;
+}
 
 const byteMask = (1 << 8) - 1;
 
