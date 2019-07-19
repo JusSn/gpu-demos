@@ -4,33 +4,26 @@ const originalBufferBindingNum = 0;
 const outputBufferBindingNum = 1;
 const uniformsBufferBindingNum = 2;
 
-function init() {
+async function init() {
     if (!navigator.gpu) {
         document.body.className = 'error';
         return;
     }
 
-    const slider = document.getElementById("radiusSlider");
-    const button = document.getElementById("blurButton");
+    const slider = document.querySelector("input");
+    const canvas = document.querySelector("canvas");
+    const context2d = canvas.getContext("2d");
 
-    button.onclick = async () => {
-        button.disabled = true;
+    const image = await loadImage(canvas, context2d);
+
+    slider.onchange = async () => {
         slider.disabled = true;
-        await computeBlur(slider.value);
-        button.disabled = false;
+        await computeBlur(slider.value, image, context2d);
         slider.disabled = false;
     };
 }
 
-let uniformsCache = new Map();
-
-async function computeBlur(radius) {
-    const adapter = await navigator.gpu.requestAdapter();
-    const device = await adapter.requestDevice();
-
-    const canvas = document.querySelector("canvas");
-    const context2d = canvas.getContext("2d");
-
+async function loadImage(canvas, context2d) {
     /* Image */
     const image = new Image();
     const imageLoadPromise = new Promise(resolve => { 
@@ -44,7 +37,23 @@ async function computeBlur(radius) {
 
     context2d.drawImage(image, 0, 0);
 
-    const originalData = context2d.getImageData(0, 0, image.width, image.height);
+    return image;
+}
+
+let uniformsCache = new Map();
+let originalData;
+
+async function computeBlur(radius, image, context2d) {
+    if (radius == 0) {
+        context2d.drawImage(image, 0, 0);
+        return;
+    }
+
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+
+    if (originalData === undefined)
+        originalData = context2d.getImageData(0, 0, image.width, image.height);
     const imageLength = originalData.data.length;
 
     const [originalBuffer, originalArrayBuffer] = device.createBufferMapped({ 
@@ -174,11 +183,9 @@ function calculateWeights(radius)
 	const twoSigma2 = 2.0 * sigma * sigma;
 
     let weights = [radius];
-	
 	let weightSum = 0;
 
-	for (let i = -radius; i <= radius; ++i)
-	{
+	for (let i = -radius; i <= radius; ++i) {
         const weight = Math.exp(-i * i / twoSigma2);
         weightSum += weight;
         if (i >= 0)
@@ -186,9 +193,7 @@ function calculateWeights(radius)
     }
 
 	for (let i = 1; i < weights.length; ++i)
-	{
 		weights[i] /= weightSum;
-	}
 
 	return weights;
 }
