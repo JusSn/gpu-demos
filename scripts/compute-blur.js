@@ -16,7 +16,7 @@ function init() {
     button.onclick = async () => {
         button.disabled = true;
         slider.disabled = true;
-        await computeBlur(4);
+        await computeBlur(slider.value);
         button.disabled = false;
         slider.disabled = false;
     };
