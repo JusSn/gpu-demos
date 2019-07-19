@@ -199,6 +199,16 @@ uint makeRGBA(uint r, uint g, uint b, uint a)
     return r + (g << 8) + (b << 16) + (a << 24);
 }
 
+uint weightedColor(uint startColor, float weight)
+{
+    uint r = uint(float(getR(startColor)) * weight);
+    uint g = uint(float(getG(startColor)) * weight);
+    uint b = uint(float(getB(startColor)) * weight);
+    uint a = uint(float(getA(startColor)) * weight);
+
+    return makeRGBA(r, g, b, a);
+}
+
 uint verticallyOffsetIndex(uint index, int offset)
 {
     int realOffset = offset * ${image.width};
@@ -218,21 +228,15 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
     int radius = int(uniforms[0]);
     uint globalIndex = uint(dispatchThreadID.y) * ${image.width} + uint(dispatchThreadID.x);
 
-    uint r = 0;
-    uint g = 0;
-    uint b = 0;
-    uint a = 0;
+    uint color = 0;
 
     for (int i = -radius; i <= radius; ++i) {
         uint startColor = origBuffer[uint(int(globalIndex) + i)];
         float weight = uniforms[uint(abs(i) + 1)];
-        r += uint(float(getR(startColor)) * weight);
-        g += uint(float(getG(startColor)) * weight);
-        b += uint(float(getB(startColor)) * weight);
-        a += uint(float(getA(startColor)) * weight);
+        color += weightedColor(startColor, weight);
     }
 
-    outputBuffer[globalIndex] = makeRGBA(r, g, b, a);
+    outputBuffer[globalIndex] = color;
 }
 
 [numthreads(1, ${threadsPerThreadgroup}, 1)]
@@ -244,21 +248,15 @@ compute void vertical(device uint[] origBuffer : register(u${originalBufferBindi
     int radius = int(uniforms[0]);
     uint globalIndex = uint(dispatchThreadID.x) * ${image.height} + uint(dispatchThreadID.y);
 
-    uint r = 0;
-    uint g = 0;
-    uint b = 0;
-    uint a = 0;
+    uint color = 0;
 
     for (int i = -radius; i <= radius; ++i) {
         uint startColor = middleBuffer[verticallyOffsetIndex(globalIndex, i)];
         float weight = uniforms[uint(abs(i) + 1)];
-        r += uint(float(getR(startColor)) * weight);
-        g += uint(float(getG(startColor)) * weight);
-        b += uint(float(getB(startColor)) * weight);
-        a += uint(float(getA(startColor)) * weight);
+        color += weightedColor(startColor, weight);
     }
 
-    origBuffer[globalIndex] = makeRGBA(r, g, b, a);
+    origBuffer[globalIndex] = color;
 }
 `;
 }
