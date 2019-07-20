@@ -28,7 +28,7 @@ async function loadImage(canvas, context2d) {
     const image = new Image();
     const imageLoadPromise = new Promise(resolve => { 
         image.onload = () => resolve(); 
-        image.src = "resources/safari-opaque.png"
+        image.src = "resources/blue-checkered.png"
     });
     await Promise.resolve(imageLoadPromise);
 
@@ -250,12 +250,11 @@ void accumulateChannels(thread uint[] channels, uint startColor, float weight)
         channels[3] = 255;
 }
 
-uint horizontallyOffsetIndex(uint index, int offset, float rowNumber)
+uint horizontallyOffsetIndex(uint index, int offset, uint rowStart, uint rowEnd)
 {
     int offsetIndex = int(index) + offset;
-    uint endOfRow = ${image.width} * (1 + uint(rowNumber));
 
-    if (offsetIndex < 0 || offsetIndex >= int(endOfRow))
+    if (offsetIndex < int(rowStart) || offsetIndex >= int(rowEnd))
         return index;
     
     return uint(offsetIndex);
@@ -279,12 +278,14 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
                         float3 dispatchThreadID : SV_DispatchThreadID)
 {
     int radius = int(uniforms[0]);
-    uint globalIndex = uint(dispatchThreadID.y) * ${image.width} + uint(dispatchThreadID.x);
+    uint rowStart = ${image.width} * uint(dispatchThreadID.y);
+    uint rowEnd = ${image.width} * (1 + uint(dispatchThreadID.y));
+    uint globalIndex = rowStart + uint(dispatchThreadID.x);
 
     uint[4] channels;
 
     for (int i = -radius; i <= radius; ++i) {
-        uint startColor = origBuffer[horizontallyOffsetIndex(globalIndex, i, dispatchThreadID.y)];
+        uint startColor = origBuffer[horizontallyOffsetIndex(globalIndex, i, rowStart, rowEnd)];
         float weight = uniforms[uint(abs(i) + 1)];
         accumulateChannels(@channels, startColor, weight);
     }
