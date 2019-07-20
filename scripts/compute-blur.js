@@ -1,12 +1,12 @@
 const threadsPerThreadgroup = 32;
 
 const originalBufferBindingNum = 0;
-const outputBufferBindingNum = 1;
+const storageBufferBindingNum = 1;
 const uniformsBufferBindingNum = 2;
 
 async function init() {
     if (!navigator.gpu) {
-        document.body.className = 'error';
+        document.body.className = "error";
         return;
     }
 
@@ -14,11 +14,13 @@ async function init() {
     const canvas = document.querySelector("canvas");
     const context2d = canvas.getContext("2d");
 
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
     const image = await loadImage(canvas, context2d);
 
     slider.onchange = async () => {
         slider.disabled = true;
-        await computeBlur(slider.value, image, context2d);
+        await computeBlur(slider.value, image, context2d, device);
         slider.disabled = false;
     };
 }
@@ -28,7 +30,7 @@ async function loadImage(canvas, context2d) {
     const image = new Image();
     const imageLoadPromise = new Promise(resolve => { 
         image.onload = () => resolve(); 
-        image.src = "resources/blue-checkered.png"
+        image.src = "resources/safari-alpha.png"
     });
     await Promise.resolve(imageLoadPromise);
 
@@ -42,15 +44,13 @@ async function loadImage(canvas, context2d) {
 
 let uniformsCache = new Map();
 let originalData;
+let storageBuffer;
 
-async function computeBlur(radius, image, context2d) {
+async function computeBlur(radius, image, context2d, device) {
     if (radius == 0) {
         context2d.drawImage(image, 0, 0);
         return;
     }
-
-    const adapter = await navigator.gpu.requestAdapter();
-    const device = await adapter.requestDevice();
 
     if (originalData === undefined)
         originalData = context2d.getImageData(0, 0, image.width, image.height);
@@ -64,8 +64,9 @@ async function computeBlur(radius, image, context2d) {
     imageWriteArray.set(originalData.data);
     originalBuffer.unmap();
 
-    // Create output buffer
-    const outputBuffer = device.createBuffer({ size: imageSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ });
+    // Create storage buffer
+    if (storageBuffer === undefined) 
+        storageBuffer = device.createBuffer({ size: imageSize, usage: GPUBufferUsage.STORAGE });
 
     // Create uniforms buffer
     let uniforms = uniformsCache.get(radius);
@@ -87,7 +88,7 @@ async function computeBlur(radius, image, context2d) {
             visibility: GPUShaderStageBit.COMPUTE,
             type: "storage-buffer"
         }, {
-            binding: outputBufferBindingNum,
+            binding: storageBufferBindingNum,
             visibility: GPUShaderStageBit.COMPUTE,
             type: "storage-buffer"
         }, {
@@ -106,9 +107,9 @@ async function computeBlur(radius, image, context2d) {
                 size: imageSize
             }
         }, {
-            binding: outputBufferBindingNum,
+            binding: storageBufferBindingNum,
             resource: {
-                buffer: outputBuffer,
+                buffer: storageBuffer,
                 size: imageSize
             }
         }, {
@@ -168,7 +169,6 @@ async function computeBlur(radius, image, context2d) {
 
     // Draw originalBuffer as imageData back into context2d
     const resultArrayBuffer = await originalBuffer.mapReadAsync();
-
     const resultArray = new Uint8ClampedArray(resultArrayBuffer);
     context2d.putImageData(new ImageData(resultArray, image.width, image.height), 0, 0);
 }
@@ -273,7 +273,7 @@ uint verticallyOffsetIndex(uint index, int offset, uint length)
 
 [numthreads(${threadsPerThreadgroup}, 1, 1)]
 compute void horizontal(constant uint[] origBuffer : register(u${originalBufferBindingNum}),
-                        device uint[] outputBuffer : register(u${outputBufferBindingNum}),
+                        device uint[] storageBuffer : register(u${storageBufferBindingNum}),
                         constant float[] uniforms : register(b${uniformsBufferBindingNum}),
                         float3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -290,12 +290,12 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
         accumulateChannels(@channels, startColor, weight);
     }
 
-    outputBuffer[globalIndex] = makeRGBA(channels[0], channels[1], channels[2], channels[3]);
+    storageBuffer[globalIndex] = makeRGBA(channels[0], channels[1], channels[2], channels[3]);
 }
 
 [numthreads(1, ${threadsPerThreadgroup}, 1)]
 compute void vertical(device uint[] origBuffer : register(u${originalBufferBindingNum}),
-                        constant uint[] middleBuffer : register(u${outputBufferBindingNum}),
+                        constant uint[] middleBuffer : register(u${storageBufferBindingNum}),
                         constant float[] uniforms : register(b${uniformsBufferBindingNum}),
                         float3 dispatchThreadID : SV_DispatchThreadID)
 {
