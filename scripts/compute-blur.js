@@ -54,10 +54,10 @@ async function computeBlur(radius, image, context2d) {
 
     if (originalData === undefined)
         originalData = context2d.getImageData(0, 0, image.width, image.height);
-    const imageLength = originalData.data.length;
+    const imageSize = originalData.data.length;
 
     const [originalBuffer, originalArrayBuffer] = device.createBufferMapped({ 
-        size: imageLength, 
+        size: imageSize, 
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ 
     });
     const imageWriteArray = new Uint8ClampedArray(originalArrayBuffer);
@@ -65,7 +65,7 @@ async function computeBlur(radius, image, context2d) {
     originalBuffer.unmap();
 
     // Create output buffer
-    const outputBuffer = device.createBuffer({ size: imageLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ });
+    const outputBuffer = device.createBuffer({ size: imageSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ });
 
     // Create uniforms buffer
     let uniforms = uniformsCache.get(radius);
@@ -103,13 +103,13 @@ async function computeBlur(radius, image, context2d) {
             binding: originalBufferBindingNum,
             resource: {
                 buffer: originalBuffer,
-                size: imageLength
+                size: imageSize
             }
         }, {
             binding: outputBufferBindingNum,
             resource: {
                 buffer: outputBuffer,
-                size: imageLength
+                size: imageSize
             }
         }, {
             binding: uniformsBufferBindingNum,
@@ -192,6 +192,9 @@ function calculateWeights(radius)
             weights.push(weight);
     }
 
+    // Correct for loss in brightness
+    const brightnessScale =  1 - (0.1 / 32.0) * radius;
+    weightSum *= brightnessScale;
 	for (let i = 1; i < weights.length; ++i)
 		weights[i] /= weightSum;
 
@@ -224,7 +227,6 @@ uint getA(uint rgba)
 
 uint makeRGBA(uint r, uint g, uint b, uint a)
 {
-    // Because little-endian? ¯\_(ツ)_/¯
     return r + (g << 8) + (b << 16) + (a << 24);
 }
 
