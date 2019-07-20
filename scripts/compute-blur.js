@@ -250,11 +250,11 @@ void accumulateChannels(thread uint[] channels, uint startColor, float weight)
         channels[3] = 255;
 }
 
-uint horizontallyOffsetIndex(uint index, int offset, uint rowStart, uint rowEnd)
+uint horizontallyOffsetIndex(uint index, int offset, int rowStart, int rowEnd)
 {
     int offsetIndex = int(index) + offset;
 
-    if (offsetIndex < int(rowStart) || offsetIndex >= int(rowEnd))
+    if (offsetIndex < rowStart || offsetIndex >= rowEnd)
         return index;
     
     return uint(offsetIndex);
@@ -278,9 +278,9 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
                         float3 dispatchThreadID : SV_DispatchThreadID)
 {
     int radius = int(uniforms[0]);
-    uint rowStart = ${image.width} * uint(dispatchThreadID.y);
-    uint rowEnd = ${image.width} * (1 + uint(dispatchThreadID.y));
-    uint globalIndex = rowStart + uint(dispatchThreadID.x);
+    int rowStart = ${image.width} * int(dispatchThreadID.y);
+    int rowEnd = ${image.width} * (1 + int(dispatchThreadID.y));
+    uint globalIndex = uint(rowStart) + uint(dispatchThreadID.x);
 
     uint[4] channels;
 
