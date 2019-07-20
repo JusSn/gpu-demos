@@ -81,7 +81,7 @@ body.error #error {
     font-size: 30px;
 }
 
-/* Slider */
+/* Slider from W3Schools */
 .slidecontainer {
     width: 50%;
 }
@@ -108,7 +108,7 @@ body.error #error {
     width: 25px;
     height: 25px;
     border-radius: 50%;
-    background: #4CAF50;
+    background: rgb(33, 133, 255);
     cursor: pointer;
 }
 
@@ -116,6 +116,6 @@ body.error #error {
     width: 25px;
     height: 25px;
     border-radius: 50%;
-    background: #4CAF50;
+    background: rgb(33, 133, 255);
     cursor: pointer;
 }
