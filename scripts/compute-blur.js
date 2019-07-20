@@ -192,7 +192,7 @@ function calculateWeights(radius)
             weights.push(weight);
     }
 
-    // Correct for loss in brightness
+    // Compensate for loss in brightness
     const brightnessScale =  1 - (0.1 / 32.0) * radius;
     weightSum *= brightnessScale;
 	for (let i = 1; i < weights.length; ++i)
@@ -230,14 +230,25 @@ uint makeRGBA(uint r, uint g, uint b, uint a)
     return r + (g << 8) + (b << 16) + (a << 24);
 }
 
-uint weightedColor(uint startColor, float weight)
+void accumulateChannels(thread uint[] channels, uint startColor, float weight)
 {
-    uint r = uint(float(getR(startColor)) * weight);
-    uint g = uint(float(getG(startColor)) * weight);
-    uint b = uint(float(getB(startColor)) * weight);
-    uint a = uint(float(getA(startColor)) * weight);
+    channels[0] += uint(float(getR(startColor)) * weight);
+    channels[1] += uint(float(getG(startColor)) * weight);
+    channels[2] += uint(float(getB(startColor)) * weight);
+    channels[3] += uint(float(getA(startColor)) * weight);
 
-    return makeRGBA(r, g, b, a);
+    // Compensate for brightness-adjusted weights.
+    if (channels[0] > 255)
+        channels[0] = 255;
+
+    if (channels[1] > 255)
+        channels[1] = 255;
+
+    if (channels[2] > 255)
+        channels[2] = 255;
+
+    if (channels[3] > 255)
+        channels[3] = 255;
 }
 
 uint verticallyOffsetIndex(uint index, int offset)
@@ -259,15 +270,15 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
     int radius = int(uniforms[0]);
     uint globalIndex = uint(dispatchThreadID.y) * ${image.width} + uint(dispatchThreadID.x);
 
-    uint color = 0;
+    uint[4] channels;
 
     for (int i = -radius; i <= radius; ++i) {
         uint startColor = origBuffer[uint(int(globalIndex) + i)];
         float weight = uniforms[uint(abs(i) + 1)];
-        color += weightedColor(startColor, weight);
+        accumulateChannels(@channels, startColor, weight);
     }
 
-    outputBuffer[globalIndex] = color;
+    outputBuffer[globalIndex] = makeRGBA(channels[0], channels[1], channels[2], channels[3]);
 }
 
 [numthreads(1, ${threadsPerThreadgroup}, 1)]
@@ -279,15 +290,15 @@ compute void vertical(device uint[] origBuffer : register(u${originalBufferBindi
     int radius = int(uniforms[0]);
     uint globalIndex = uint(dispatchThreadID.x) * ${image.height} + uint(dispatchThreadID.y);
 
-    uint color = 0;
+    uint[4] channels;
 
     for (int i = -radius; i <= radius; ++i) {
         uint startColor = middleBuffer[verticallyOffsetIndex(globalIndex, i)];
         float weight = uniforms[uint(abs(i) + 1)];
-        color += weightedColor(startColor, weight);
+        accumulateChannels(@channels, startColor, weight);
     }
 
-    origBuffer[globalIndex] = color;
+    origBuffer[globalIndex] = makeRGBA(channels[0], channels[1], channels[2], channels[3]);
 }
 `;
 }
