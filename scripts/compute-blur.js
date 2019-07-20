@@ -185,11 +185,10 @@ function calculateWeights(radius)
     let weights = [radius];
 	let weightSum = 0;
 
-	for (let i = -radius; i <= radius; ++i) {
+	for (let i = 0; i <= radius; ++i) {
         const weight = Math.exp(-i * i / twoSigma2);
-        weightSum += weight;
-        if (i >= 0)
-            weights.push(weight);
+        weights.push(weight);
+        weightSum += (i == 0) ? weight : weight * 2;
     }
 
     // Compensate for loss in brightness
@@ -251,14 +250,26 @@ void accumulateChannels(thread uint[] channels, uint startColor, float weight)
         channels[3] = 255;
 }
 
-uint verticallyOffsetIndex(uint index, int offset)
+uint horizontallyOffsetIndex(uint index, int offset, float rowNumber)
+{
+    int offsetIndex = int(index) + offset;
+    uint endOfRow = ${image.width} * (1 + uint(rowNumber));
+
+    if (offsetIndex < 0 || offsetIndex >= int(endOfRow))
+        return index;
+    
+    return uint(offsetIndex);
+}
+
+uint verticallyOffsetIndex(uint index, int offset, uint length)
 {
     int realOffset = offset * ${image.width};
+    int offsetIndex = int(index) + realOffset;
 
-    if (int(index) + realOffset < 0)
-        return 0;
+    if (offsetIndex < 0 || offsetIndex >= int(length))
+        return index;
     
-    return uint(int(index) + realOffset);
+    return uint(offsetIndex);
 }
 
 [numthreads(${threadsPerThreadgroup}, 1, 1)]
@@ -273,7 +284,7 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
     uint[4] channels;
 
     for (int i = -radius; i <= radius; ++i) {
-        uint startColor = origBuffer[uint(int(globalIndex) + i)];
+        uint startColor = origBuffer[horizontallyOffsetIndex(globalIndex, i, dispatchThreadID.y)];
         float weight = uniforms[uint(abs(i) + 1)];
         accumulateChannels(@channels, startColor, weight);
     }
@@ -293,7 +304,7 @@ compute void vertical(device uint[] origBuffer : register(u${originalBufferBindi
     uint[4] channels;
 
     for (int i = -radius; i <= radius; ++i) {
-        uint startColor = middleBuffer[verticallyOffsetIndex(globalIndex, i)];
+        uint startColor = middleBuffer[verticallyOffsetIndex(globalIndex, i, middleBuffer.length)];
         float weight = uniforms[uint(abs(i) + 1)];
         accumulateChannels(@channels, startColor, weight);
     }
