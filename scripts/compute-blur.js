@@ -152,18 +152,20 @@ async function computeBlur(radius, image, context2d, device) {
 
     // Run horizontal pass first
     const commandEncoder = device.createCommandEncoder();
-    let passEncoder = commandEncoder.beginComputePass();
+    const passEncoder = commandEncoder.beginComputePass();
     passEncoder.setBindGroup(0, bindGroup);
     passEncoder.setPipeline(horizontalPipeline);
     const numXGroups = Math.ceil(image.width / threadsPerThreadgroup);
     passEncoder.dispatch(numXGroups, image.height, 1);
+    passEncoder.endPass();
 
     // Run vertical pass back to originalBuffer
-    passEncoder.setBindGroup(0, bindGroup);
-    passEncoder.setPipeline(verticalPipeline);
+    const verticalPassEncoder = commandEncoder.beginComputePass();
+    verticalPassEncoder.setBindGroup(0, bindGroup);
+    verticalPassEncoder.setPipeline(verticalPipeline);
     const numYGroups = Math.ceil(image.height / threadsPerThreadgroup);
-    passEncoder.dispatch(image.width, numYGroups, 1);
-    passEncoder.endPass();
+    verticalPassEncoder.dispatch(image.width, numYGroups, 1);
+    verticalPassEncoder.endPass();
 
     device.getQueue().submit([commandEncoder.finish()]);
 
