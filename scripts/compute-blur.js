@@ -22,13 +22,10 @@ async function init() {
     const adapter = await navigator.gpu.requestAdapter();
     device = await adapter.requestDevice();
     image = await loadImage(canvas);
+
     setUpCompute();
 
-    slider.onchange = async () => {
-        slider.disabled = true;
-        await computeBlur(slider.value);
-        slider.disabled = false;
-    };
+    slider.oninput = () => { computeBlur(slider.value); };
 }
 
 async function loadImage(canvas) {
@@ -152,23 +149,16 @@ function setUpCompute() {
     });
 }
 
-let uniformsCache = new Map();
-
 async function computeBlur(radius) {
     if (radius == 0) {
         context2d.drawImage(image, 0, 0);
         return;
     }
 
-    // TODO: Do weight calc, mapWriting with Promise.all
+    const setUniformsPromise = setUniforms(radius);
+    const uniformsMappingPromise = uniformsBuffer.mapWriteAsync();
 
-    let uniforms = uniformsCache.get(radius);
-    if (uniforms === undefined) {
-        uniforms = calculateWeights(radius);
-        uniformsCache.set(radius, uniforms);
-    }
-
-    const uniformsArrayBuffer = await uniformsBuffer.mapWriteAsync();
+    const [uniforms, uniformsArrayBuffer] = await Promise.all([setUniformsPromise, uniformsMappingPromise]);
 
     const uniformsWriteArray = new Float32Array(uniformsArrayBuffer);
     uniformsWriteArray.set(uniforms);
@@ -204,27 +194,35 @@ window.addEventListener("load", init);
 
 /* Helpers */
 
-function calculateWeights(radius)
+let uniformsCache = new Map();
+
+async function setUniforms(radius)
 {
+    let uniforms = uniformsCache.get(radius);
+    if (uniforms != undefined)
+        return uniforms;
+
     const sigma = radius / 2.0;
 	const twoSigma2 = 2.0 * sigma * sigma;
 
-    let weights = [radius];
+    uniforms = [radius];
 	let weightSum = 0;
 
 	for (let i = 0; i <= radius; ++i) {
         const weight = Math.exp(-i * i / twoSigma2);
-        weights.push(weight);
+        uniforms.push(weight);
         weightSum += (i == 0) ? weight : weight * 2;
     }
 
     // Compensate for loss in brightness
     const brightnessScale =  1 - (0.1 / 32.0) * radius;
     weightSum *= brightnessScale;
-	for (let i = 1; i < weights.length; ++i)
-		weights[i] /= weightSum;
+	for (let i = 1; i < uniforms.length; ++i)
+        uniforms[i] /= weightSum;
+        
+    uniformsCache.set(radius, uniforms);
 
-	return weights;
+	return uniforms;
 }
 
 const byteMask = (1 << 8) - 1;
