@@ -1,8 +1,13 @@
 const threadsPerThreadgroup = 32;
 
-const originalBufferBindingNum = 0;
-const storageBufferBindingNum = 1;
+const sourceBufferBindingNum = 0;
+const outputBufferBindingNum = 1;
 const uniformsBufferBindingNum = 2;
+
+// Enough space to store 1 radius and 33 weights.
+const maxUniformsSize = (32 + 2) * Float32Array.BYTES_PER_ELEMENT;
+
+let image, context2d, device;
 
 async function init() {
     if (!navigator.gpu) {
@@ -12,20 +17,21 @@ async function init() {
 
     const slider = document.querySelector("input");
     const canvas = document.querySelector("canvas");
-    const context2d = canvas.getContext("2d");
+    context2d = canvas.getContext("2d");
 
     const adapter = await navigator.gpu.requestAdapter();
-    const device = await adapter.requestDevice();
-    const image = await loadImage(canvas, context2d);
+    device = await adapter.requestDevice();
+    image = await loadImage(canvas);
+    setUpCompute();
 
     slider.onchange = async () => {
         slider.disabled = true;
-        await computeBlur(slider.value, image, context2d, device);
+        await computeBlur(slider.value);
         slider.disabled = false;
     };
 }
 
-async function loadImage(canvas, context2d) {
+async function loadImage(canvas) {
     /* Image */
     const image = new Image();
     const imageLoadPromise = new Promise(resolve => { 
@@ -42,53 +48,33 @@ async function loadImage(canvas, context2d) {
     return image;
 }
 
-let uniformsCache = new Map();
-let originalData;
-let storageBuffer;
+let originalData, imageSize;
+let originalBuffer, storageBuffer, resultsBuffer, uniformsBuffer;
+let horizontalBindGroup, verticalBindGroup, horizontalPipeline, verticalPipeline;
 
-async function computeBlur(radius, image, context2d, device) {
-    if (radius == 0) {
-        context2d.drawImage(image, 0, 0);
-        return;
-    }
+function setUpCompute() {
+    originalData = context2d.getImageData(0, 0, image.width, image.height);
+    imageSize = originalData.data.length;
 
-    if (originalData === undefined)
-        originalData = context2d.getImageData(0, 0, image.width, image.height);
-    const imageSize = originalData.data.length;
-
-    const [originalBuffer, originalArrayBuffer] = device.createBufferMapped({ 
-        size: imageSize, 
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ 
-    });
+    // Buffer creation
+    let originalArrayBuffer;
+    [originalBuffer, originalArrayBuffer] = device.createBufferMapped({ size: imageSize, usage: GPUBufferUsage.STORAGE });
     const imageWriteArray = new Uint8ClampedArray(originalArrayBuffer);
     imageWriteArray.set(originalData.data);
     originalBuffer.unmap();
 
-    // Create storage buffer
-    if (storageBuffer === undefined) 
-        storageBuffer = device.createBuffer({ size: imageSize, usage: GPUBufferUsage.STORAGE });
-
-    // Create uniforms buffer
-    let uniforms = uniformsCache.get(radius);
-    if (uniforms === undefined) {
-        uniforms = calculateWeights(radius);
-        uniformsCache.set(radius, uniforms);
-    }
-    const uniformsBufferSize = uniforms.length * Float32Array.BYTES_PER_ELEMENT;
-
-    const [uniformsBuffer, uniformsArrayBuffer] = device.createBufferMapped({ size: uniformsBufferSize, usage: GPUBufferUsage.UNIFORM });
-    const uniformsWriteArray = new Float32Array(uniformsArrayBuffer);
-    uniformsWriteArray.set(uniforms);
-    uniformsBuffer.unmap();
+    storageBuffer = device.createBuffer({ size: imageSize, usage: GPUBufferUsage.STORAGE });
+    resultsBuffer = device.createBuffer({ size: imageSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.MAP_READ });
+    uniformsBuffer = device.createBuffer({ size: maxUniformsSize, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.MAP_WRITE });
 
     // Bind buffers to kernel   
     const bindGroupLayout = device.createBindGroupLayout({
         bindings: [{
-            binding: originalBufferBindingNum,
+            binding: sourceBufferBindingNum,
             visibility: GPUShaderStageBit.COMPUTE,
             type: "storage-buffer"
         }, {
-            binding: storageBufferBindingNum,
+            binding: outputBufferBindingNum,
             visibility: GPUShaderStageBit.COMPUTE,
             type: "storage-buffer"
         }, {
@@ -98,16 +84,16 @@ async function computeBlur(radius, image, context2d, device) {
         }]
     });
 
-    const bindGroup = device.createBindGroup({
+    horizontalBindGroup = device.createBindGroup({
         layout: bindGroupLayout,
         bindings: [{
-            binding: originalBufferBindingNum,
+            binding: sourceBufferBindingNum,
             resource: {
                 buffer: originalBuffer,
                 size: imageSize
             }
         }, {
-            binding: storageBufferBindingNum,
+            binding: outputBufferBindingNum,
             resource: {
                 buffer: storageBuffer,
                 size: imageSize
@@ -116,19 +102,40 @@ async function computeBlur(radius, image, context2d, device) {
             binding: uniformsBufferBindingNum,
             resource: {
                 buffer: uniformsBuffer,
-                size: uniformsBufferSize
+                size: maxUniformsSize
             }
         }]
     });
 
-    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
+    verticalBindGroup = device.createBindGroup({
+        layout: bindGroupLayout,
+        bindings: [{
+            binding: sourceBufferBindingNum,
+            resource: {
+                buffer: storageBuffer,
+                size: imageSize
+            }
+        }, {
+            binding: outputBufferBindingNum,
+            resource: {
+                buffer: resultsBuffer,
+                size: imageSize
+            }
+        }, {
+            binding: uniformsBufferBindingNum,
+            resource: {
+                buffer: uniformsBuffer,
+                size: maxUniformsSize
+            }
+        }]
+    });
 
     // Set up pipelines
+    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
+
     const shaderModule = device.createShaderModule({ code: createShaderCode(image), isWHLSL: true });
 
-    device.pushErrorScope("validation");
-
-    const horizontalPipeline = device.createComputePipeline({ 
+    horizontalPipeline = device.createComputePipeline({ 
         layout: pipelineLayout, 
         computeStage: {
             module: shaderModule,
@@ -136,32 +143,49 @@ async function computeBlur(radius, image, context2d, device) {
         }
     });
 
-    device.popErrorScope().then(error => { if (error) console.log(error.message); });
-
-    device.pushErrorScope("validation");
-
-    const verticalPipeline = device.createComputePipeline({
+    verticalPipeline = device.createComputePipeline({
         layout: pipelineLayout,
         computeStage: {
             module: shaderModule,
             entryPoint: "vertical"
         }
     });
+}
 
-    device.popErrorScope().then(error => { if (error) console.log(error.message); });
+let uniformsCache = new Map();
+
+async function computeBlur(radius) {
+    if (radius == 0) {
+        context2d.drawImage(image, 0, 0);
+        return;
+    }
+
+    // TODO: Do weight calc, mapWriting with Promise.all
+
+    let uniforms = uniformsCache.get(radius);
+    if (uniforms === undefined) {
+        uniforms = calculateWeights(radius);
+        uniformsCache.set(radius, uniforms);
+    }
+
+    const uniformsArrayBuffer = await uniformsBuffer.mapWriteAsync();
+
+    const uniformsWriteArray = new Float32Array(uniformsArrayBuffer);
+    uniformsWriteArray.set(uniforms);
+    uniformsBuffer.unmap();
 
     // Run horizontal pass first
     const commandEncoder = device.createCommandEncoder();
     const passEncoder = commandEncoder.beginComputePass();
-    passEncoder.setBindGroup(0, bindGroup);
+    passEncoder.setBindGroup(0, horizontalBindGroup);
     passEncoder.setPipeline(horizontalPipeline);
     const numXGroups = Math.ceil(image.width / threadsPerThreadgroup);
     passEncoder.dispatch(numXGroups, image.height, 1);
     passEncoder.endPass();
 
-    // Run vertical pass back to originalBuffer
+    // Run vertical pass
     const verticalPassEncoder = commandEncoder.beginComputePass();
-    verticalPassEncoder.setBindGroup(0, bindGroup);
+    verticalPassEncoder.setBindGroup(0, verticalBindGroup);
     verticalPassEncoder.setPipeline(verticalPipeline);
     const numYGroups = Math.ceil(image.height / threadsPerThreadgroup);
     verticalPassEncoder.dispatch(image.width, numYGroups, 1);
@@ -169,10 +193,11 @@ async function computeBlur(radius, image, context2d, device) {
 
     device.getQueue().submit([commandEncoder.finish()]);
 
-    // Draw originalBuffer as imageData back into context2d
-    const resultArrayBuffer = await originalBuffer.mapReadAsync();
+    // Draw resultsBuffer as imageData back into context2d
+    const resultArrayBuffer = await resultsBuffer.mapReadAsync();
     const resultArray = new Uint8ClampedArray(resultArrayBuffer);
     context2d.putImageData(new ImageData(resultArray, image.width, image.height), 0, 0);
+    resultsBuffer.unmap();
 }
 
 window.addEventListener("load", init);
@@ -274,8 +299,8 @@ uint verticallyOffsetIndex(uint index, int offset, uint length)
 }
 
 [numthreads(${threadsPerThreadgroup}, 1, 1)]
-compute void horizontal(constant uint[] origBuffer : register(u${originalBufferBindingNum}),
-                        device uint[] storageBuffer : register(u${storageBufferBindingNum}),
+compute void horizontal(constant uint[] source : register(u${sourceBufferBindingNum}),
+                        device uint[] output : register(u${outputBufferBindingNum}),
                         constant float[] uniforms : register(b${uniformsBufferBindingNum}),
                         float3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -287,17 +312,17 @@ compute void horizontal(constant uint[] origBuffer : register(u${originalBufferB
     uint[4] channels;
 
     for (int i = -radius; i <= radius; ++i) {
-        uint startColor = origBuffer[horizontallyOffsetIndex(globalIndex, i, rowStart, rowEnd)];
+        uint startColor = source[horizontallyOffsetIndex(globalIndex, i, rowStart, rowEnd)];
         float weight = uniforms[uint(abs(i) + 1)];
         accumulateChannels(@channels, startColor, weight);
     }
 
-    storageBuffer[globalIndex] = makeRGBA(channels[0], channels[1], channels[2], channels[3]);
+    output[globalIndex] = makeRGBA(channels[0], channels[1], channels[2], channels[3]);
 }
 
 [numthreads(1, ${threadsPerThreadgroup}, 1)]
-compute void vertical(device uint[] origBuffer : register(u${originalBufferBindingNum}),
-                        constant uint[] middleBuffer : register(u${storageBufferBindingNum}),
+compute void vertical(constant uint[] source : register(u${sourceBufferBindingNum}),
+                        device uint[] output : register(u${outputBufferBindingNum}),
                         constant float[] uniforms : register(b${uniformsBufferBindingNum}),
                         float3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -307,12 +332,12 @@ compute void vertical(device uint[] origBuffer : register(u${originalBufferBindi
     uint[4] channels;
 
     for (int i = -radius; i <= radius; ++i) {
-        uint startColor = middleBuffer[verticallyOffsetIndex(globalIndex, i, middleBuffer.length)];
+        uint startColor = source[verticallyOffsetIndex(globalIndex, i, source.length)];
         float weight = uniforms[uint(abs(i) + 1)];
         accumulateChannels(@channels, startColor, weight);
     }
 
-    origBuffer[globalIndex] = makeRGBA(channels[0], channels[1], channels[2], channels[3]);
+    output[globalIndex] = makeRGBA(channels[0], channels[1], channels[2], channels[3]);
 }
 `;
 }
