@@ -25,7 +25,19 @@ async function init() {
 
     setUpCompute();
 
-    slider.oninput = () => { computeBlur(slider.value); };
+    let busy = false;
+    let inputQueue = [];
+    slider.oninput = async () => {
+        inputQueue.push(slider.value);
+        
+        if (busy)
+            return;
+
+        busy = true;
+        while (inputQueue.length != 0)
+            await computeBlur(inputQueue.shift());
+        busy = false;
+    };
 }
 
 async function loadImage(canvas) {
@@ -154,7 +166,6 @@ async function computeBlur(radius) {
         context2d.drawImage(image, 0, 0);
         return;
     }
-
     const setUniformsPromise = setUniforms(radius);
     const uniformsMappingPromise = uniformsBuffer.mapWriteAsync();
 
